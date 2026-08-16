@@ -1,4 +1,3 @@
-// test3_arrays_pointers_struct.cl -- arrays, pointers, structs, I/O, function calls
 struct Point {
     int x;
     int y;

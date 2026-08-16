@@ -4,7 +4,11 @@
 #define MAX_SIZE 50
 #endif
 
-enum Color { RED, GREEN, BLUE };
+enum Color {
+    RED,
+    GREEN,
+    BLUE
+};
 
 union Data {
     int i;
@@ -36,8 +40,6 @@ int main() {
     Animal *ap;
     ap = new Animal();
     delete ap;
-
-    /* ---- crazy feature: time-travel variables ---- */
     int score = 10;
     snapshot score;
     score = 20;
@@ -46,7 +48,7 @@ int main() {
     rewind score, 2;      // score should go back to 10
     rewind score;         // rewind one step by default
 
-    int result = score |> classify |> normalize;  // bonus pipeline operator
+    int result = score |> classify |> normalize;
 
     return 0;
 }

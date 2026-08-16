@@ -1,4 +1,4 @@
-int main() {
+int main(){
     const int a = 10;
     short b = 3;
     unsigned c;
@@ -25,15 +25,11 @@ int main() {
     }
 
     int max = (a > b) ? a : b;
-
     a <-> b;
-
     int *p;
     p = &a;
     *p = 42;
-
     int **pp;
     pp = &p;
-
     return 0;
 }
