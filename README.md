@@ -22,7 +22,7 @@ Before getting started, make sure you have **Flex** installed on your system. If
 
 ---
 
-## Steps to run the analyzer
+## Steps to run
 
 1. **Clone the repository:**
    ```bash
@@ -41,12 +41,44 @@ Before getting started, make sure you have **Flex** installed on your system. If
 
     To run individual test cases, you can use the command:
     ```bash
-    ./lexer /test/test1_operators.min OR make run FILE=/path/to/file
+    ./lexer /test/test1_operators.min
+    #OR
+    make run FILE=/path/to/file
     ```
 
 3. **Clean up the build files:**
     ```bash
     make clean
     ```
+
+---
+
+## Lexical Analyzer  
+The lexical analyzer takes the Minerva code (.min) as input and the output is the token table  
+The token table shows the token's line in the code, the lexeme and the token type  
+Below is a list of all the lexemes that we're considering and parsing:  
+| Lexeme | Token Type |
+| -------- | -------- |
+|   `if`, `else`, `for`, `while`, `do`, `until`, `switch`, `case`,`default`, `break`, `continue`, `goto`, `return`,`int`, `char`, `void`, `float`, `short`, `unsigned`, `const`, `static`, `typedef`,`class`, `struct`, `union`, `enum`, `public`, `private`, `protected`, `new`, `delete`,`printf`, `scanf`,`snapshot`, `rewind` | Keywords |
+| `^"#"[ \t]*[a-zA-Z_]+[^\n]*` | Preprocessor Statments |   
+| `\"([^"\n\\]\|\\.)*\"` | String Literals |
+| `'(\\.\|[^'\\\n])'` | Char Literals |
+| `"nullptr"` | NULL Literal |
+| `<<=`, `>>==`, `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `\|=`, `^=`, `=` | Assignment Operator |
+| `<->` | Swap Operator |
+| `\|>` | Pipe Operator |
+| `::`, `->`, `.` | Member Operator |
+| `++`, `--`, `**`, `+`, `-`, `*`, `/`, `%` | Arithmetic Operator |
+| `==`, `!=`, `<=`, `>=`, `<`, `>` | Relational Operator |
+| `&&`, `\|\|`, `!` | Logical Operator |
+| `<<`, `>>`, `&`, `\|`, `^`, `~` | Bitwise Operator |
+| `?` | Ternary Operator |
+| `(`, `)`, `{`, `}`, `[`, `]`, `;`, `,`, `:` | Delimiter |  
+
+Few interesting things we wanted to experiment with: 
+- Swap Operator (`<->`): Swaps two variables of the same type. Can be used as `a<->b`  
+- Pipe Operator (`|>`): Pipes function outputs into another. Syntactic sugar for nested functions  
+- Snapshot and Rewind Keywords: Stores a history of any variable, if you take a snapshot of it and can pop and rewind back to previous states. The use case we saw here was of undo/redo implementations and in backtracking algorithms
+
 
 
