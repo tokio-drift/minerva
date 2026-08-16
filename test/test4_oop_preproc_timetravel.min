@@ -1,0 +1,52 @@
+#include <stdio.h>
+#define MAX_SIZE 100
+#ifndef MAX_SIZE
+#define MAX_SIZE 50
+#endif
+
+enum Color { RED, GREEN, BLUE };
+
+union Data {
+    int i;
+    float f;
+    char c;
+};
+
+class Animal {
+    private:
+        int age;
+    protected:
+        char name[20];
+    public:
+        int legs;
+};
+
+typedef struct Point {
+    int x;
+    int y;
+} Point;
+
+int main() {
+    enum Color favorite;
+    favorite = RED;
+
+    Animal a;
+    a.legs = 4;
+
+    Animal *ap;
+    ap = new Animal();
+    delete ap;
+
+    /* ---- crazy feature: time-travel variables ---- */
+    int score = 10;
+    snapshot score;
+    score = 20;
+    snapshot score;
+    score = 30;
+    rewind score, 2;      // score should go back to 10
+    rewind score;         // rewind one step by default
+
+    int result = score |> classify |> normalize;  // bonus pipeline operator
+
+    return 0;
+}

@@ -1,0 +1,39 @@
+int main() {
+    const int a = 10;
+    short b = 3;
+    unsigned c;
+
+    c = a + b - a * b / b % a;
+    c = a ** 2;
+    a++;
+    b--;
+
+    c += 1;
+    c -= 2;
+    c *= 3;
+    c /= 4;
+    c %= 5;
+    c &= 1;
+    c |= 2;
+    c ^= 3;
+    c <<= 1;
+    c >>= 1;
+
+    if (a == b && c != a || !(a < b) || (a >= b && b <= a)) {
+        c = a & b | (a ^ b) & ~b;
+        c = a << 2 >> 1;
+    }
+
+    int max = (a > b) ? a : b;
+
+    a <-> b;
+
+    int *p;
+    p = &a;
+    *p = 42;
+
+    int **pp;
+    pp = &p;
+
+    return 0;
+}

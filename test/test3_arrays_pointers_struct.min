@@ -1,0 +1,38 @@
+// test3_arrays_pointers_struct.cl -- arrays, pointers, structs, I/O, function calls
+struct Point {
+    int x;
+    int y;
+};
+
+static int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    int arr[5];
+    char name[10];
+    int i;
+
+    for (i = 0; i < 5; i++) {
+        arr[i] = i * i;
+    }
+
+    int *p;
+    p = &arr[0];
+    *p = 42;
+
+    struct Point pt;
+    pt.x = 1;
+    pt.y = 2;
+
+    struct Point *pp;
+    pp = &pt;
+    pp->x = 10;
+
+    int sum = add(pt.x, pt.y);
+
+    printf("Sum is %d\n", sum);
+    scanf("%d", &sum);
+
+    return 0;
+}

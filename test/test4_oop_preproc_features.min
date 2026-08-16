@@ -1,0 +1,57 @@
+#include <stdio.h>
+#define MAX_SIZE 100
+#ifndef MAX_SIZE
+#define MAX_SIZE 50
+#endif
+
+enum Color { RED, GREEN, BLUE };
+
+union Data {
+    int i;
+    float f;
+    char c;
+};
+
+class Animal {
+    private:
+        int age;
+    protected:
+        char name[20];
+    public:
+        int legs;
+};
+
+typedef struct Point {
+    int x;
+    int y;
+} Point;
+
+int normalize(int n) {
+    return n;
+}
+
+int main() {
+    enum Color favorite;
+    favorite = RED;
+
+    Animal a;
+    a.legs = 4;
+
+    Animal *ap;
+    ap = new Animal();
+    delete ap;
+
+    int x = Animal::legs;
+
+    int score = 10;
+    snapshot score;
+    score = 20;
+    snapshot score;
+    score = 30;
+    rewind score, 2;
+    rewind score;
+
+    int result = score |> classify |> normalize;
+
+    return 0;
+}

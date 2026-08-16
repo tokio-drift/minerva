@@ -1,0 +1,43 @@
+struct Point {
+    int x;
+    int y;
+};
+
+static int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    int arr[5];
+    int i;
+
+    for (i = 0; i < 5; i++) {
+        arr[i] = i * i;
+    }
+
+    int *p;
+    p = &arr[0];
+    *p = 42;
+
+    int **pp;
+    pp = &p;
+    **pp = 99;
+
+    struct Point pt;
+    pt.x = 1;
+    pt.y = 2;
+
+    struct Point *pp2;
+    pp2 = &pt;
+    pp2->x = 10;
+
+    int *nothing;
+    nothing = nullptr;
+
+    int sum = add(pt.x, pt.y);
+
+    printf("Sum is %d\n", sum);
+    scanf("%d", &sum);
+
+    return 0;
+}
