@@ -1,43 +1,9 @@
 %{
-#include <iostream>
-#include <sstream>
-#include <string>
-#include <vector>
-#include <unordered_set>
-#include <iomanip>
-#include <cstdlib>
+#include "y.tab.h"
+#include <string.h>
 
-using namespace std;
-
-struct TokEntry{
-    int line;
-    string lexeme;
-    string token;
-};
-struct ErrEntry{
-    int line;
-    string message;
-};
-
-static vector<TokEntry> g_tokens;
-static vector<ErrEntry> g_errors;
-static int g_commentStartLine = 0;
-
-static void addTok(const string &tokName){
-    g_tokens.push_back({yylineno,string(yytext),tokName});
-}
-static void addErr(const string &msg){
-    g_errors.push_back({yylineno,msg});
-}
-
-static unordered_set<string> g_keywords = {
-    "if", "else", "for", "while", "do", "until", "switch", "case",
-    "default", "break", "continue", "goto", "return",
-    "int", "char", "void", "float", "short", "unsigned", "const", "static", "typedef",
-    "class", "struct", "union", "enum", "public", "private", "protected", "new", "delete",
-    "printf", "scanf",
-    "snapshot", "rewind"
-};
+extern void add_token(const char* lexeme, const char* type);
+int g_commentStartLine = 0;
 %}
 
 %option noyywrap
@@ -53,148 +19,120 @@ ID {LETTER}({LETTER}|{DIGIT})*
 
 %%
 
-[ \t\r]+ {}
-\n {}
+[ \t\r\n]+          { /* Ignore */ }
+"//".*              { /* Ignore */ }
 
-"//".* {}
+"/*"                { g_commentStartLine = yylineno; BEGIN(COMMENT); }
+<COMMENT>"*/"       { BEGIN(INITIAL); }
+<COMMENT>\n         { }
+<COMMENT>.          { }
+<COMMENT><<EOF>>    { fprintf(stderr, "Unterminated comment\n"); BEGIN(INITIAL); yyterminate(); }
 
-"/*" {g_commentStartLine = yylineno;BEGIN(COMMENT);}
-<COMMENT>"*/" {BEGIN(INITIAL);}
-<COMMENT>\n {}
-<COMMENT>. {}
-<COMMENT><<EOF>> {
-    yylineno = g_commentStartLine;
-    addErr("Unterminated comment (started at line "+to_string(g_commentStartLine)+")");
-    BEGIN(INITIAL);
-    yyterminate();
-}
+^"#"[ \t]*[a-zA-Z_]+[^\n]* { add_token(yytext, "PREPROCESSOR"); yylval.str_val = strdup(yytext); return T_PREPROC; }
 
-^"#"[ \t]*[a-zA-Z_]+[^\n]* {addTok("PREPROCESSOR");}
+\"([^"\n\\]|\\.)*\" { add_token(yytext, "STRING_LITERAL"); yylval.str_val = strdup(yytext); return T_STRING_LIT; }
 
-\"([^"\n\\]|\\.)*\" {addTok("STRING_LITERAL");}
-\"([^"\n\\]|\\.)* {addErr("Unterminated string literal: "+string(yytext));}
+'(\\.|[^'\\\n])'    { add_token(yytext, "CHAR_LITERAL"); yylval.str_val = strdup(yytext); return T_CHAR_LIT; }
 
-'(\\.|[^'\\\n])' {addTok("CHAR_LITERAL");}
-'' {addErr("Empty char literal: ''");}
-'(\\.|[^'\\\n]){2,}' {addErr("Invalid char literal (too many characters): "+string(yytext));}
-'(\\.|[^'\\\n])* {addErr("Unterminated char literal: "+string(yytext));}
+{DIGIT}+"."{DIGIT}+([eE][+-]?{DIGIT}+)? |
+{DIGIT}+[eE][+-]?{DIGIT}+ { add_token(yytext, "FLOAT_LITERAL"); yylval.str_val = strdup(yytext); return T_FLOAT_LIT; }
 
-{DIGIT}+"."{DIGIT}+([eE][+-]?{DIGIT}+)? {addTok("FLOAT_LITERAL");}
-{DIGIT}+[eE][+-]?{DIGIT}+ {addTok("FLOAT_LITERAL");}
-{DIGIT}+{LETTER}({LETTER}|{DIGIT})* {addErr("Invalid number/identifier (digit-led): "+string(yytext));}
-{DIGIT}+ {addTok("INT_LITERAL");}
+{DIGIT}+            { add_token(yytext, "INT_LITERAL"); yylval.str_val = strdup(yytext); return T_INT_LIT; }
 
-"nullptr" {addTok("NULL_LITERAL");}
+"nullptr"           { add_token(yytext, "NULL_LITERAL"); yylval.str_val = strdup(yytext); return T_NULL_LIT; }
 
-{ID} {
-    if(g_keywords.count(yytext)) 
-        addTok("KEYWORD");
-    else 
-        addTok("IDENTIFIER");
-}
+"if"        { add_token(yytext, "KEYWORD"); return T_IF; }
+"else"      { add_token(yytext, "KEYWORD"); return T_ELSE; }
+"for"       { add_token(yytext, "KEYWORD"); return T_FOR; }
+"while"     { add_token(yytext, "KEYWORD"); return T_WHILE; }
+"do"        { add_token(yytext, "KEYWORD"); return T_DO; }
+"until"     { add_token(yytext, "KEYWORD"); return T_UNTIL; }
+"switch"    { add_token(yytext, "KEYWORD"); return T_SWITCH; }
+"case"      { add_token(yytext, "KEYWORD"); return T_CASE; }
+"default"   { add_token(yytext, "KEYWORD"); return T_DEFAULT; }
+"break"     { add_token(yytext, "KEYWORD"); return T_BREAK; }
+"continue"  { add_token(yytext, "KEYWORD"); return T_CONTINUE; }
+"goto"      { add_token(yytext, "KEYWORD"); return T_GOTO; }
+"return"    { add_token(yytext, "KEYWORD"); return T_RETURN; }
+"int"       { add_token(yytext, "KEYWORD"); return T_INT; }
+"char"      { add_token(yytext, "KEYWORD"); return T_CHAR; }
+"void"      { add_token(yytext, "KEYWORD"); return T_VOID; }
+"float"     { add_token(yytext, "KEYWORD"); return T_FLOAT; }
+"short"     { add_token(yytext, "KEYWORD"); return T_SHORT; }
+"unsigned"  { add_token(yytext, "KEYWORD"); return T_UNSIGNED; }
+"const"     { add_token(yytext, "KEYWORD"); return T_CONST; }
+"static"    { add_token(yytext, "KEYWORD"); return T_STATIC; }
+"typedef"   { add_token(yytext, "KEYWORD"); return T_TYPEDEF; }
+"class"     { add_token(yytext, "KEYWORD"); return T_CLASS; }
+"struct"    { add_token(yytext, "KEYWORD"); return T_STRUCT; }
+"union"     { add_token(yytext, "KEYWORD"); return T_UNION; }
+"enum"      { add_token(yytext, "KEYWORD"); return T_ENUM; }
+"public"    { add_token(yytext, "KEYWORD"); return T_PUBLIC; }
+"private"   { add_token(yytext, "KEYWORD"); return T_PRIVATE; }
+"protected" { add_token(yytext, "KEYWORD"); return T_PROTECTED; }
+"new"       { add_token(yytext, "KEYWORD"); return T_NEW; }
+"delete"    { add_token(yytext, "KEYWORD"); return T_DELETE; }
+"printf"    { add_token(yytext, "KEYWORD"); return T_PRINTF; }
+"scanf"     { add_token(yytext, "KEYWORD"); return T_SCANF; }
+"snapshot"  { add_token(yytext, "KEYWORD"); return T_SNAPSHOT; }
+"rewind"    { add_token(yytext, "KEYWORD"); return T_REWIND; }
 
-"<<=" {addTok("ASSIGNMENT_OPERATOR");}
-">>=" {addTok("ASSIGNMENT_OPERATOR");}
-"<->" {addTok("SWAP_OPERATOR");}
-"::" {addTok("MEMBER_OPERATOR");}
-"->" {addTok("MEMBER_OPERATOR");}
-"++" {addTok("ARITHMETIC_OPERATOR");}
-"--" {addTok("ARITHMETIC_OPERATOR");}
-"**" {addTok("ARITHMETIC_OPERATOR");}
-"==" {addTok("RELATIONAL_OPERATOR");}
-"!=" {addTok("RELATIONAL_OPERATOR");}
-"<=" {addTok("RELATIONAL_OPERATOR");}
-">=" {addTok("RELATIONAL_OPERATOR");}
-"&&" {addTok("LOGICAL_OPERATOR");}
-"||" {addTok("LOGICAL_OPERATOR");}
-"<<" {addTok("BITWISE_OPERATOR");}
-">>" {addTok("BITWISE_OPERATOR");}
-"+=" {addTok("ASSIGNMENT_OPERATOR");}
-"-=" {addTok("ASSIGNMENT_OPERATOR");}
-"*=" {addTok("ASSIGNMENT_OPERATOR");}
-"/=" {addTok("ASSIGNMENT_OPERATOR");}
-"%=" {addTok("ASSIGNMENT_OPERATOR");}
-"&=" {addTok("ASSIGNMENT_OPERATOR");}
-"|=" {addTok("ASSIGNMENT_OPERATOR");}
-"^=" {addTok("ASSIGNMENT_OPERATOR");}
-"|>" {addTok("PIPE_OPERATOR");}
+"Point"|"Animal"|"Color"|"Data" { add_token(yytext, "TYPE_IDENTIFIER"); yylval.str_val = strdup(yytext); return T_TYPE_ID; }
 
-"+" {addTok("ARITHMETIC_OPERATOR");}
-"-" {addTok("ARITHMETIC_OPERATOR");}
-"*" {addTok("ARITHMETIC_OPERATOR");}
-"/" {addTok("ARITHMETIC_OPERATOR");}
-"%" {addTok("ARITHMETIC_OPERATOR");}
-"=" {addTok("ASSIGNMENT_OPERATOR");}
-"<" {addTok("RELATIONAL_OPERATOR");}
-">" {addTok("RELATIONAL_OPERATOR");}
-"!" {addTok("LOGICAL_OPERATOR");}
-"&" {addTok("BITWISE_OPERATOR");}
-"|" {addTok("BITWISE_OPERATOR");}
-"^" {addTok("BITWISE_OPERATOR");}
-"~" {addTok("BITWISE_OPERATOR");}
-"?" {addTok("TERNARY_OPERATOR");}
-"." {addTok("MEMBER_OPERATOR");}
+{ID}        { add_token(yytext, "IDENTIFIER"); yylval.str_val = strdup(yytext); return T_IDENTIFIER; }
 
-"(" {addTok("DELIMITER");}
-")" {addTok("DELIMITER");}
-"{" {addTok("DELIMITER");}
-"}" {addTok("DELIMITER");}
-"[" {addTok("DELIMITER");}
-"]" {addTok("DELIMITER");}
-";" {addTok("DELIMITER");}
-"," {addTok("DELIMITER");}
-":" {addTok("DELIMITER");}
+"<<="       { add_token(yytext, "ASSIGNMENT_OPERATOR"); return T_SHL_ASSIGN; }
+">>="       { add_token(yytext, "ASSIGNMENT_OPERATOR"); return T_SHR_ASSIGN; }
+"<->"       { add_token(yytext, "SWAP_OPERATOR"); return T_SWAP; }
+"::"        { add_token(yytext, "MEMBER_OPERATOR"); return T_SCOPE; }
+"->"        { add_token(yytext, "MEMBER_OPERATOR"); return T_ARROW; }
+"++"        { add_token(yytext, "ARITHMETIC_OPERATOR"); return T_INC; }
+"--"        { add_token(yytext, "ARITHMETIC_OPERATOR"); return T_DEC; }
+"**"        { add_token(yytext, "ARITHMETIC_OPERATOR"); return T_DOUBLE_STAR; }
+"=="        { add_token(yytext, "RELATIONAL_OPERATOR"); return T_EQ; }
+"!="        { add_token(yytext, "RELATIONAL_OPERATOR"); return T_NEQ; }
+"<="        { add_token(yytext, "RELATIONAL_OPERATOR"); return T_LE; }
+">="        { add_token(yytext, "RELATIONAL_OPERATOR"); return T_GE; }
+"&&"        { add_token(yytext, "LOGICAL_OPERATOR"); return T_LOGICAL_AND; }
+"||"        { add_token(yytext, "LOGICAL_OPERATOR"); return T_LOGICAL_OR; }
+"<<"        { add_token(yytext, "BITWISE_OPERATOR"); return T_LSHIFT; }
+">>"        { add_token(yytext, "BITWISE_OPERATOR"); return T_RSHIFT; }
+"+="        { add_token(yytext, "ASSIGNMENT_OPERATOR"); return T_ADD_ASSIGN; }
+"-="        { add_token(yytext, "ASSIGNMENT_OPERATOR"); return T_SUB_ASSIGN; }
+"*="        { add_token(yytext, "ASSIGNMENT_OPERATOR"); return T_MUL_ASSIGN; }
+"/="        { add_token(yytext, "ASSIGNMENT_OPERATOR"); return T_DIV_ASSIGN; }
+"%="        { add_token(yytext, "ASSIGNMENT_OPERATOR"); return T_MOD_ASSIGN; }
+"&="        { add_token(yytext, "ASSIGNMENT_OPERATOR"); return T_AND_ASSIGN; }
+"|="        { add_token(yytext, "ASSIGNMENT_OPERATOR"); return T_OR_ASSIGN; }
+"^="        { add_token(yytext, "ASSIGNMENT_OPERATOR"); return T_XOR_ASSIGN; }
+"|>"        { add_token(yytext, "PIPE_OPERATOR"); return T_PIPE; }
 
-. {addErr(string("Unrecognized character: '")+yytext+"'");}
+"+"         { add_token(yytext, "ARITHMETIC_OPERATOR"); return T_PLUS; }
+"-"         { add_token(yytext, "ARITHMETIC_OPERATOR"); return T_MINUS; }
+"*"         { add_token(yytext, "ARITHMETIC_OPERATOR"); return T_STAR; }
+"/"         { add_token(yytext, "ARITHMETIC_OPERATOR"); return T_SLASH; }
+"%"         { add_token(yytext, "ARITHMETIC_OPERATOR"); return T_MOD; }
+"="         { add_token(yytext, "ASSIGNMENT_OPERATOR"); return T_ASSIGN; }
+"<"         { add_token(yytext, "RELATIONAL_OPERATOR"); return T_LT; }
+">"         { add_token(yytext, "RELATIONAL_OPERATOR"); return T_GT; }
+"!"         { add_token(yytext, "LOGICAL_OPERATOR"); return T_LOGICAL_NOT; }
+"&"         { add_token(yytext, "BITWISE_OPERATOR"); return T_BITWISE_AND; }
+"|"         { add_token(yytext, "BITWISE_OPERATOR"); return T_BITWISE_OR; }
+"^"         { add_token(yytext, "BITWISE_OPERATOR"); return T_BITWISE_XOR; }
+"~"         { add_token(yytext, "BITWISE_OPERATOR"); return T_BITWISE_NOT; }
+"?"         { add_token(yytext, "TERNARY_OPERATOR"); return T_QUESTION; }
+"."         { add_token(yytext, "MEMBER_OPERATOR"); return T_DOT; }
+
+"("         { add_token(yytext, "DELIMITER"); return T_LPAREN; }
+")"         { add_token(yytext, "DELIMITER"); return T_RPAREN; }
+"{"         { add_token(yytext, "DELIMITER"); return T_LBRACE; }
+"}"         { add_token(yytext, "DELIMITER"); return T_RBRACE; }
+"["         { add_token(yytext, "DELIMITER"); return T_LBRACKET; }
+"]"         { add_token(yytext, "DELIMITER"); return T_RBRACKET; }
+";"         { add_token(yytext, "DELIMITER"); return T_SEMI; }
+","         { add_token(yytext, "DELIMITER"); return T_COMMA; }
+":"         { add_token(yytext, "DELIMITER"); return T_COLON; }
+
+.           { fprintf(stderr, "Lexical Error on line %d: '%s'\n", yylineno, yytext); }
 
 %%
-
-#define RED "\033[1;31m"
-#define GREEN "\033[1;32m"
-#define ENDCLR "\033[0m" 
-
-static void printTokenTable() {
-    cout<<GREEN<<"\nTOKEN TABLE\n"<<ENDCLR;
-    cout<<left<<setw(8)<<"LINE"<<setw(24)<<"LEXEME"<<setw(22)<<"TOKEN"<<"\n";
-    cout<<string(50, '-')<<"\n";
-    for (auto &t :g_tokens){
-        cout<<left<<setw(8)<<t.line<<setw(24)<<t.lexeme<<setw(22)<<t.token<<"\n";
-    }
-    cout<<string(50,'-')<<"\n";
-    cout<<"Total tokens: "<<g_tokens.size()<<"\n";
-    cout<<"Status: "<<GREEN<<"VALID"<<ENDCLR<<" (0 lexical errors)\n";
-}
-
-static void printErrorReport() {
-    cout<<RED<<"\nLEXICAL ERRORS\n"<<ENDCLR;
-    for (auto &e : g_errors) {
-        cout<<"Line "<<e.line<<": "<<e.message<<"\n";
-    }
-    cout<<string(50, '-')<<"\n";
-    cout<<"Total lexical errors: "<<g_errors.size()<<"\n";
-    cout<<"Status: "<<RED<<"INVALID\n"<<ENDCLR;
-}
-
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        cerr<<"Usage: "<<argv[0]<<" <source-file>\n";
-        return 1;
-    }
-    FILE *f = fopen(argv[1], "r");
-    if(!f){
-        cerr<<"Error: cannot open file '"<<argv[1]<<"'\n";
-        return 1;
-    }
-    yyin = f;
-    yylex();
-    fclose(f);
-
-    if(!g_errors.empty()){
-        printErrorReport();
-        return 2;
-    } 
-    else{
-        printTokenTable();
-        return 0;
-    }
-}
