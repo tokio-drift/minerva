@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-EXE="${1:-./lexer}"
+EXE="${1:-./minerva}"
 pass=0
 fail=0
 GREEN="\033[1;32m"
@@ -11,12 +11,12 @@ for f in test/*.min; do
     echo "Running: $f"
     "$EXE" "$f"
     EXIT_CODE=$?
-    if [[ "$f" == *"error"* ]];then
+    if [[ "$f" == *"lexical_errors"* || "$f" == *"syntax_errors"* ]];then
         if [ "$EXIT_CODE" -eq 2 ]; then
             echo -e "Result: ${GREEN}PASS${ENDCLR}"
             ((pass++))
         else
-            echo -e "Result: ${RED}FAIL${ENDCLR} (Expected lexical errors)"
+            echo -e "Result: ${RED}FAIL${ENDCLR} (Expected errors)"
             ((fail++))
         fi
     else
