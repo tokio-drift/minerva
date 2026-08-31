@@ -9,7 +9,7 @@ This repository contains the code for Minerva, a compiler for a C-like programmi
 * `src/`: Contains the source code and implementation for the lexical analyzer.
 * `test/`: Contains individual test files (e.g., test cases for operators, keywords, constants, identifiers and other tokens).
 * `Makefile`: Automates building, running, and cleaning the project.
-* `run.sh`: Bash script which could be used to run the complete test suite.
+* `run.sh`: Bash script which runs the complete test suite.
 
 ---
 
@@ -32,7 +32,7 @@ Before getting started, make sure you have **Flex** installed on your system. If
 
 2. **Run the test cases:**
     ```bash
-    make build
+    make
     ```
     To run the complete test suite, use the command:
     ```bash
@@ -41,7 +41,7 @@ Before getting started, make sure you have **Flex** installed on your system. If
 
     To run individual test cases, you can use the command:
     ```bash
-    ./lexer /test/test1_operators.min
+    ./minerva test/test1_operators.min
     #OR
     make run FILE=/path/to/file
     ```
