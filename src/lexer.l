@@ -1,43 +1,17 @@
 %{
-#include <iostream>
-#include <sstream>
 #include <string>
-#include <vector>
-#include <unordered_set>
-#include <iomanip>
 #include <cstdlib>
+#include "parser.tab.h"
 
 using namespace std;
 
-struct TokEntry{
-    int line;
-    string lexeme;
-    string token;
-};
-struct ErrEntry{
-    int line;
-    string message;
-};
+extern YYLTYPE yylloc;
+#define YY_USER_ACTION \
+    yylloc.first_line = yylloc.last_line = yylineno;
 
-static vector<TokEntry> g_tokens;
-static vector<ErrEntry> g_errors;
-static int g_commentStartLine = 0;
-
-static void addTok(const string &tokName){
-    g_tokens.push_back({yylineno,string(yytext),tokName});
-}
-static void addErr(const string &msg){
-    g_errors.push_back({yylineno,msg});
-}
-
-static unordered_set<string> g_keywords = {
-    "if", "else", "for", "while", "do", "until", "switch", "case",
-    "default", "break", "continue", "goto", "return",
-    "int", "char", "void", "float", "short", "unsigned", "const", "static", "typedef",
-    "class", "struct", "union", "enum", "public", "private", "protected", "new", "delete",
-    "printf", "scanf",
-    "snapshot", "rewind"
-};
+extern void addTok(const string &tokName);
+extern void addErr(const string &msg);
+extern int g_commentStartLine;
 %}
 
 %option noyywrap
@@ -69,132 +43,113 @@ ID {LETTER}({LETTER}|{DIGIT})*
     yyterminate();
 }
 
-^"#"[ \t]*[a-zA-Z_]+[^\n]* {addTok("PREPROCESSOR");}
+^[ \t]*"#"[ \t]*[a-zA-Z_]+[^\n]* {addTok("PREPROCESSOR"); return PREPROCESSOR;}
 
-\"([^"\n\\]|\\.)*\" {addTok("STRING_LITERAL");}
+\"([^"\n\\]|\\.)*\" {addTok("STRING_LITERAL"); return STRING_LITERAL;}
 \"([^"\n\\]|\\.)* {addErr("Unterminated string literal: "+string(yytext));}
 
-'(\\.|[^'\\\n])' {addTok("CHAR_LITERAL");}
+'(\\.|[^'\\\n])' {addTok("CHAR_LITERAL"); return CHAR_LITERAL;}
 '' {addErr("Empty char literal: ''");}
 '(\\.|[^'\\\n]){2,}' {addErr("Invalid char literal (too many characters): "+string(yytext));}
 '(\\.|[^'\\\n])* {addErr("Unterminated char literal: "+string(yytext));}
 
-{DIGIT}+"."{DIGIT}+([eE][+-]?{DIGIT}+)? {addTok("FLOAT_LITERAL");}
-{DIGIT}+[eE][+-]?{DIGIT}+ {addTok("FLOAT_LITERAL");}
+{DIGIT}+"."{DIGIT}+([eE][+-]?{DIGIT}+)? {addTok("FLOAT_LITERAL"); return FLOAT_LITERAL;}
+{DIGIT}+[eE][+-]?{DIGIT}+ {addTok("FLOAT_LITERAL"); return FLOAT_LITERAL;}
 {DIGIT}+{LETTER}({LETTER}|{DIGIT})* {addErr("Invalid number/identifier (digit-led): "+string(yytext));}
-{DIGIT}+ {addTok("INT_LITERAL");}
+{DIGIT}+ {addTok("INT_LITERAL"); return INT_LITERAL;}
 
-"nullptr" {addTok("NULL_LITERAL");}
+"nullptr" {addTok("NULL_LITERAL"); return NULL_LITERAL;}
 
-{ID} {
-    if(g_keywords.count(yytext)) 
-        addTok("KEYWORD");
-    else 
-        addTok("IDENTIFIER");
-}
+"if" {addTok("KEYWORD"); return IF;}
+"else" {addTok("KEYWORD"); return ELSE;}
+"for" {addTok("KEYWORD"); return FOR;}
+"while" {addTok("KEYWORD"); return WHILE;}
+"do" {addTok("KEYWORD"); return DO;}
+"until" {addTok("KEYWORD"); return UNTIL;}
+"switch" {addTok("KEYWORD"); return SWITCH;}
+"case" {addTok("KEYWORD"); return CASE;}
+"default" {addTok("KEYWORD"); return DEFAULT;}
+"break" {addTok("KEYWORD"); return BREAK;}
+"continue" {addTok("KEYWORD"); return CONTINUE;}
+"goto" {addTok("KEYWORD"); return GOTO;}
+"return" {addTok("KEYWORD"); return RETURN;}
+"int" {addTok("KEYWORD"); return INT;}
+"char" {addTok("KEYWORD"); return CHAR;}
+"void" {addTok("KEYWORD"); return VOID;}
+"float" {addTok("KEYWORD"); return FLOAT;}
+"short" {addTok("KEYWORD"); return SHORT;}
+"unsigned" {addTok("KEYWORD"); return UNSIGNED;}
+"const" {addTok("KEYWORD"); return CONST;}
+"static" {addTok("KEYWORD"); return STATIC;}
+"typedef" {addTok("KEYWORD"); return TYPEDEF;}
+"class" {addTok("KEYWORD"); return CLASS;}
+"struct" {addTok("KEYWORD"); return STRUCT;}
+"union" {addTok("KEYWORD"); return UNION;}
+"enum" {addTok("KEYWORD"); return ENUM;}
+"public" {addTok("KEYWORD"); return PUBLIC;}
+"private" {addTok("KEYWORD"); return PRIVATE;}
+"protected" {addTok("KEYWORD"); return PROTECTED;}
+"new" {addTok("KEYWORD"); return NEW;}
+"delete" {addTok("KEYWORD"); return DELETE;}
+"printf" {addTok("KEYWORD"); return PRINTF;}
+"scanf" {addTok("KEYWORD"); return SCANF;}
+"sizeof" {addTok("KEYWORD"); return SIZEOF;}
+"snapshot" {addTok("KEYWORD"); return SNAPSHOT;}
+"rewind" {addTok("KEYWORD"); return REWIND;}
 
-"<<=" {addTok("ASSIGNMENT_OPERATOR");}
-">>=" {addTok("ASSIGNMENT_OPERATOR");}
-"<->" {addTok("SWAP_OPERATOR");}
-"::" {addTok("MEMBER_OPERATOR");}
-"->" {addTok("MEMBER_OPERATOR");}
-"++" {addTok("ARITHMETIC_OPERATOR");}
-"--" {addTok("ARITHMETIC_OPERATOR");}
-"**" {addTok("ARITHMETIC_OPERATOR");}
-"==" {addTok("RELATIONAL_OPERATOR");}
-"!=" {addTok("RELATIONAL_OPERATOR");}
-"<=" {addTok("RELATIONAL_OPERATOR");}
-">=" {addTok("RELATIONAL_OPERATOR");}
-"&&" {addTok("LOGICAL_OPERATOR");}
-"||" {addTok("LOGICAL_OPERATOR");}
-"<<" {addTok("BITWISE_OPERATOR");}
-">>" {addTok("BITWISE_OPERATOR");}
-"+=" {addTok("ASSIGNMENT_OPERATOR");}
-"-=" {addTok("ASSIGNMENT_OPERATOR");}
-"*=" {addTok("ASSIGNMENT_OPERATOR");}
-"/=" {addTok("ASSIGNMENT_OPERATOR");}
-"%=" {addTok("ASSIGNMENT_OPERATOR");}
-"&=" {addTok("ASSIGNMENT_OPERATOR");}
-"|=" {addTok("ASSIGNMENT_OPERATOR");}
-"^=" {addTok("ASSIGNMENT_OPERATOR");}
-"|>" {addTok("PIPE_OPERATOR");}
+{ID} {addTok("IDENTIFIER"); return IDENTIFIER;}
 
-"+" {addTok("ARITHMETIC_OPERATOR");}
-"-" {addTok("ARITHMETIC_OPERATOR");}
-"*" {addTok("ARITHMETIC_OPERATOR");}
-"/" {addTok("ARITHMETIC_OPERATOR");}
-"%" {addTok("ARITHMETIC_OPERATOR");}
-"=" {addTok("ASSIGNMENT_OPERATOR");}
-"<" {addTok("RELATIONAL_OPERATOR");}
-">" {addTok("RELATIONAL_OPERATOR");}
-"!" {addTok("LOGICAL_OPERATOR");}
-"&" {addTok("BITWISE_OPERATOR");}
-"|" {addTok("BITWISE_OPERATOR");}
-"^" {addTok("BITWISE_OPERATOR");}
-"~" {addTok("BITWISE_OPERATOR");}
-"?" {addTok("TERNARY_OPERATOR");}
-"." {addTok("MEMBER_OPERATOR");}
+"<<=" {addTok("ASSIGNMENT_OPERATOR"); return SHL_ASSIGN;}
+">>=" {addTok("ASSIGNMENT_OPERATOR"); return SHR_ASSIGN;}
+"<->" {addTok("SWAP_OPERATOR"); return SWAP_OP;}
+"::" {addTok("MEMBER_OPERATOR"); return SCOPE_OP;}
+"->" {addTok("MEMBER_OPERATOR"); return ARROW_OP;}
+"++" {addTok("ARITHMETIC_OPERATOR"); return INC_OP;}
+"--" {addTok("ARITHMETIC_OPERATOR"); return DEC_OP;}
+"==" {addTok("RELATIONAL_OPERATOR"); return EQ_OP;}
+"!=" {addTok("RELATIONAL_OPERATOR"); return NE_OP;}
+"<=" {addTok("RELATIONAL_OPERATOR"); return LE_OP;}
+">=" {addTok("RELATIONAL_OPERATOR"); return GE_OP;}
+"&&" {addTok("LOGICAL_OPERATOR"); return AND_OP;}
+"||" {addTok("LOGICAL_OPERATOR"); return OR_OP;}
+"<<" {addTok("BITWISE_OPERATOR"); return SHL_OP;}
+">>" {addTok("BITWISE_OPERATOR"); return SHR_OP;}
+"+=" {addTok("ASSIGNMENT_OPERATOR"); return ADD_ASSIGN;}
+"-=" {addTok("ASSIGNMENT_OPERATOR"); return SUB_ASSIGN;}
+"*=" {addTok("ASSIGNMENT_OPERATOR"); return MUL_ASSIGN;}
+"/=" {addTok("ASSIGNMENT_OPERATOR"); return DIV_ASSIGN;}
+"%=" {addTok("ASSIGNMENT_OPERATOR"); return MOD_ASSIGN;}
+"&=" {addTok("ASSIGNMENT_OPERATOR"); return AND_ASSIGN;}
+"|=" {addTok("ASSIGNMENT_OPERATOR"); return OR_ASSIGN;}
+"^=" {addTok("ASSIGNMENT_OPERATOR"); return XOR_ASSIGN;}
+"|>" {addTok("PIPE_OPERATOR"); return PIPE_OP;}
 
-"(" {addTok("DELIMITER");}
-")" {addTok("DELIMITER");}
-"{" {addTok("DELIMITER");}
-"}" {addTok("DELIMITER");}
-"[" {addTok("DELIMITER");}
-"]" {addTok("DELIMITER");}
-";" {addTok("DELIMITER");}
-"," {addTok("DELIMITER");}
-":" {addTok("DELIMITER");}
+"+" {addTok("ARITHMETIC_OPERATOR"); return '+';}
+"-" {addTok("ARITHMETIC_OPERATOR"); return '-';}
+"*" {addTok("ARITHMETIC_OPERATOR"); return '*';}
+"/" {addTok("ARITHMETIC_OPERATOR"); return '/';}
+"%" {addTok("ARITHMETIC_OPERATOR"); return '%';}
+"=" {addTok("ASSIGNMENT_OPERATOR"); return '=';}
+"<" {addTok("RELATIONAL_OPERATOR"); return '<';}
+">" {addTok("RELATIONAL_OPERATOR"); return '>';}
+"!" {addTok("LOGICAL_OPERATOR"); return '!';}
+"&" {addTok("BITWISE_OPERATOR"); return '&';}
+"|" {addTok("BITWISE_OPERATOR"); return '|';}
+"^" {addTok("BITWISE_OPERATOR"); return '^';}
+"~" {addTok("BITWISE_OPERATOR"); return '~';}
+"?" {addTok("TERNARY_OPERATOR"); return '?';}
+"." {addTok("MEMBER_OPERATOR"); return '.';}
+
+"(" {addTok("DELIMITER"); return '(';}
+")" {addTok("DELIMITER"); return ')';}
+"{" {addTok("DELIMITER"); return '{';}
+"}" {addTok("DELIMITER"); return '}';}
+"[" {addTok("DELIMITER"); return '[';}
+"]" {addTok("DELIMITER"); return ']';}
+";" {addTok("DELIMITER"); return ';';}
+"," {addTok("DELIMITER"); return ',';}
+":" {addTok("DELIMITER"); return ':';}
 
 . {addErr(string("Unrecognized character: '")+yytext+"'");}
 
 %%
-
-#define RED "\033[1;31m"
-#define GREEN "\033[1;32m"
-#define ENDCLR "\033[0m" 
-
-static void printTokenTable() {
-    cout<<GREEN<<"\nTOKEN TABLE\n"<<ENDCLR;
-    cout<<left<<setw(8)<<"LINE"<<setw(24)<<"LEXEME"<<setw(22)<<"TOKEN"<<"\n";
-    cout<<string(50, '-')<<"\n";
-    for (auto &t :g_tokens){
-        cout<<left<<setw(8)<<t.line<<setw(24)<<t.lexeme<<setw(22)<<t.token<<"\n";
-    }
-    cout<<string(50,'-')<<"\n";
-    cout<<"Total tokens: "<<g_tokens.size()<<"\n";
-    cout<<"Status: "<<GREEN<<"VALID"<<ENDCLR<<" (0 lexical errors)\n";
-}
-
-static void printErrorReport() {
-    cout<<RED<<"\nLEXICAL ERRORS\n"<<ENDCLR;
-    for (auto &e : g_errors) {
-        cout<<"Line "<<e.line<<": "<<e.message<<"\n";
-    }
-    cout<<string(50, '-')<<"\n";
-    cout<<"Total lexical errors: "<<g_errors.size()<<"\n";
-    cout<<"Status: "<<RED<<"INVALID\n"<<ENDCLR;
-}
-
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        cerr<<"Usage: "<<argv[0]<<" <source-file>\n";
-        return 1;
-    }
-    FILE *f = fopen(argv[1], "r");
-    if(!f){
-        cerr<<"Error: cannot open file '"<<argv[1]<<"'\n";
-        return 1;
-    }
-    yyin = f;
-    yylex();
-    fclose(f);
-
-    if(!g_errors.empty()){
-        printErrorReport();
-        return 2;
-    } 
-    else{
-        printTokenTable();
-        return 0;
-    }
-}
