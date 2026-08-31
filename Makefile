@@ -1,28 +1,51 @@
 CXX      := g++
-CXXFLAGS := -Wall -Wno-unused-function -std=c++17
-FLEX     := flex
+CXXFLAGS := -Wall -Wno-unused-function -std=c++17 -Ibuild
+
+# OS Detection for Cross-Platform Compatibility
+ifeq ($(OS),Windows_NT)
+    FLEX      := win_flex
+    BISON     := win_bison
+    TARGET    := compiler.exe
+    MKDIR_CMD := if not exist build mkdir build
+    CLEAN_CMD := if exist build rmdir /s /q build & if exist $(TARGET) del /q $(TARGET)
+    RUN_CMD   := $(TARGET)
+else
+    FLEX      := flex
+    BISON     := bison
+    TARGET    := compiler
+    MKDIR_CMD := mkdir -p build
+    CLEAN_CMD := rm -rf build $(TARGET)
+    RUN_CMD   := ./$(TARGET)
+endif
 
 SRC_DIR   := src
 BUILD_DIR := build
 LEX_FILE  := $(SRC_DIR)/lexer.l
-GEN_FILE  := $(BUILD_DIR)/lex.yy.c
-TARGET    := lexer
+YACC_FILE := $(SRC_DIR)/parser.y
 
-.PHONY: all clean run
+LEX_GEN    := $(BUILD_DIR)/lex.yy.c
+YACC_GEN_C := $(BUILD_DIR)/y.tab.c
+YACC_GEN_H := $(BUILD_DIR)/y.tab.h
+
+.PHONY: all build clean run
 
 all: $(TARGET)
 
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+build: all
 
-$(GEN_FILE): $(LEX_FILE) | $(BUILD_DIR)
-	$(FLEX) -o $(GEN_FILE) $(LEX_FILE)
+$(YACC_GEN_C) $(YACC_GEN_H): $(YACC_FILE)
+	@$(MKDIR_CMD)
+	$(BISON) -d -o $(YACC_GEN_C) $(YACC_FILE)
 
-$(TARGET): $(GEN_FILE)
-	$(CXX) $(CXXFLAGS) -x c++ $(GEN_FILE) -o $(TARGET) -lfl
+$(LEX_GEN): $(LEX_FILE) $(YACC_GEN_H)
+	@$(MKDIR_CMD)
+	$(FLEX) -o $(LEX_GEN) $(LEX_FILE)
+
+$(TARGET): $(YACC_GEN_C) $(LEX_GEN)
+	$(CXX) $(CXXFLAGS) -x c++ $(YACC_GEN_C) $(LEX_GEN) -o $(TARGET)
 
 clean:
-	rm -rf $(BUILD_DIR) $(TARGET)
+	@$(CLEAN_CMD)
 
 run: $(TARGET)
-	./$(TARGET) $(FILE)
+	$(RUN_CMD) $(FILE)
