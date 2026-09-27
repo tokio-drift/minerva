@@ -73,6 +73,7 @@ static void printErrorReport() {
 
 %locations
 %define parse.error verbose
+%define parse.lac full
 
 %union {
     char *sval;
@@ -90,6 +91,8 @@ static void printErrorReport() {
 %token ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN AND_ASSIGN OR_ASSIGN XOR_ASSIGN
 %token PIPE_OP
 
+%nonassoc LOWER_THAN_ELSE
+%nonassoc ELSE
 %right '=' ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN AND_ASSIGN OR_ASSIGN XOR_ASSIGN SHL_ASSIGN SHR_ASSIGN
 %right '?' ':'
 %left OR_OP
@@ -101,10 +104,13 @@ static void printErrorReport() {
 %left '<' '>' LE_OP GE_OP
 %left SHL_OP SHR_OP
 %left '+' '-'
+%nonassoc PTR_LIST_END
 %left '*' '/' '%'
-%left PIPE_OP
-%right UNARY INC_OP DEC_OP '!' '~'
-%left ARROW_OP SCOPE_OP '.' '(' ')' '['  ']'
+%right UNARY
+%left INC_OP DEC_OP
+%left ARROW_OP SCOPE_OP '.'
+
+%expect 9
 
 %start translation_unit
 
@@ -119,7 +125,6 @@ external_declaration
     : PREPROCESSOR
     | function_definition
     | declaration
-    | user_type_declaration
     | class_definition
     | struct_definition
     | union_definition
@@ -127,7 +132,17 @@ external_declaration
     ;
 
 
-type_specifier
+type_qualifier
+    : CONST
+    | STATIC
+    ;
+
+type_qualifier_list
+    : type_qualifier
+    | type_qualifier_list type_qualifier
+    ;
+
+builtin_type_specifier
     : VOID
     | INT
     | CHAR
@@ -137,24 +152,35 @@ type_specifier
     | STRUCT IDENTIFIER
     | UNION IDENTIFIER
     | ENUM IDENTIFIER
+    ;
+
+type_specifier
+    : builtin_type_specifier
     | IDENTIFIER
     ;
 
-type_qualifier_opt
-    : /*empty*/
-    | CONST
-    | STATIC
-    | CONST STATIC
-    | STATIC CONST
+ptr_ref
+    : '*' {retagRecentToken(@1.first_line, "*", "POINTER_DECLARATOR");}
+    | '&' {retagRecentToken(@1.first_line, "&", "REFERENCE_DECLARATOR");}
     ;
 
-pointer_opt
-    : /*empty*/
-    | pointer_opt '*' {retagRecentToken(@2.first_line, "*", "POINTER_DECLARATOR");}
+ptr_ref_chain
+    : ptr_ref %prec PTR_LIST_END
+    | ptr_ref_chain ptr_ref
     ;
 
 full_type
-    : type_qualifier_opt type_specifier pointer_opt
+    : type_specifier
+    | type_specifier ptr_ref_chain
+    | type_qualifier_list type_specifier
+    | type_qualifier_list type_specifier ptr_ref_chain
+    ;
+
+type_name
+    : builtin_type_specifier
+    | builtin_type_specifier ptr_ref_chain
+    | type_qualifier_list builtin_type_specifier
+    | type_qualifier_list builtin_type_specifier ptr_ref_chain
     ;
 
 declaration
@@ -162,8 +188,32 @@ declaration
     | TYPEDEF full_type init_declarator_list ';'
     ;
 
-user_type_declaration
-    : IDENTIFIER pointer_opt init_declarator_list ';'
+local_type
+    : builtin_type_specifier
+    | builtin_type_specifier ptr_ref_chain
+    | type_qualifier_list builtin_type_specifier
+    | type_qualifier_list builtin_type_specifier ptr_ref_chain
+    ;
+
+name_init_declarator
+    : name_declarator
+    | name_declarator '=' initializer
+    ;
+
+name_init_declarator_list
+    : name_init_declarator
+    | name_init_declarator_list ',' name_init_declarator
+    ;
+
+local_declarators
+    : local_type init_declarator_list
+    | IDENTIFIER name_init_declarator_list
+    | IDENTIFIER ptr_ref_chain name_init_declarator_list
+    ;
+
+local_declaration
+    : local_declarators ';'
+    | TYPEDEF local_declarators ';'
     ;
 
 init_declarator_list
@@ -176,9 +226,15 @@ init_declarator
     | declarator '=' initializer
     ;
 
-declarator
+name_declarator
     : IDENTIFIER
     | IDENTIFIER array_suffix_list
+    ;
+
+declarator
+    : name_declarator
+    | '(' '*' IDENTIFIER ')' '(' parameter_list_opt ')' {retagRecentToken(@2.first_line, "*", "FUNCTION_POINTER_DECLARATOR");}
+    | '(' '*' IDENTIFIER array_suffix_list ')' '(' parameter_list_opt ')' {retagRecentToken(@2.first_line, "*", "FUNCTION_POINTER_DECLARATOR");}
     ;
 
 array_suffix_list
@@ -240,6 +296,7 @@ enumerator_list
 
 class_definition
     : CLASS IDENTIFIER '{' class_member_list_opt '}' ';'
+    | CLASS IDENTIFIER ':' access_specifier IDENTIFIER '{' class_member_list_opt '}' ';'
     ;
 
 class_member_list_opt
@@ -271,7 +328,6 @@ function_definition
 
 parameter_list_opt
     : /* empty */
-    | VOID
     | parameter_list
     ;
 
@@ -281,9 +337,9 @@ parameter_list
     ;
 
 parameter_declaration
-    : full_type IDENTIFIER
-    | full_type IDENTIFIER array_suffix_list
+    : full_type name_declarator
     | full_type
+    | full_type '(' '*' IDENTIFIER ')' '(' parameter_list_opt ')' {retagRecentToken(@3.first_line, "*", "FUNCTION_POINTER_DECLARATOR");}
     ;
 
 
@@ -303,8 +359,7 @@ statement_list
 
 statement
     : compound_statement
-    | declaration
-    | user_type_declaration
+    | local_declaration
     | expression_statement
     | selection_statement
     | iteration_statement
@@ -317,8 +372,8 @@ statement
 
 labeled_statement
     : IDENTIFIER ':' statement
-    | CASE constant_expression ':' statement_list_opt
-    | DEFAULT ':' statement_list_opt
+    | CASE constant_expression ':' statement
+    | DEFAULT ':' statement
     ;
 
 expression_statement
@@ -326,7 +381,7 @@ expression_statement
     ;
 
 selection_statement
-    : IF '(' expression ')' statement
+    : IF '(' expression ')' statement %prec LOWER_THAN_ELSE
     | IF '(' expression ')' statement ELSE statement
     | SWITCH '(' expression ')' '{' statement_list_opt '}'
     ;
@@ -341,7 +396,7 @@ iteration_statement
 for_init_opt
     : /* empty */
     | expression
-    | full_type init_declarator_list
+    | local_declarators
     ;
 
 expression_opt
@@ -474,7 +529,7 @@ pipe_expression
 
 unary_expression
     : postfix_expression
-    | '(' full_type ')' unary_expression
+    | '(' type_name ')' unary_expression
     | INC_OP unary_expression {retagRecentToken(@1.first_line, "++", "PREFIX_INCREMENT");}
     | DEC_OP unary_expression {retagRecentToken(@1.first_line, "--", "PREFIX_DECREMENT");}
     | '+' unary_expression %prec UNARY {retagRecentToken(@1.first_line, "+", "UNARY_PLUS");}
@@ -483,7 +538,7 @@ unary_expression
     | '~' unary_expression {retagRecentToken(@1.first_line, "~", "BITWISE_NOT");}
     | '*' unary_expression %prec UNARY {retagRecentToken(@1.first_line, "*", "DEREFERENCE");}
     | '&' unary_expression %prec UNARY {retagRecentToken(@1.first_line, "&", "ADDRESS_OF");}
-    | SIZEOF '(' full_type ')'
+    | SIZEOF '(' type_name ')'
     | SIZEOF '(' expression ')'
     | NEW IDENTIFIER '(' argument_list_opt ')'
     | NEW IDENTIFIER
@@ -509,6 +564,19 @@ primary_expression
     | CHAR_LITERAL
     | NULL_LITERAL
     | '(' expression ')'
+    | lambda_expression
+    ;
+
+lambda_capture
+    : /* empty */
+    | '='
+    | '&'
+    | argument_list
+    ;
+
+lambda_expression
+    : '[' lambda_capture ']' '(' parameter_list_opt ')' compound_statement
+    | '[' lambda_capture ']' compound_statement
     ;
 
 %%

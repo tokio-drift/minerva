@@ -4,7 +4,6 @@ int main(){
     unsigned c;
 
     c = a + b - a * b / b % a;
-    c = a ** 2;
     a++;
     b--;
 
