@@ -53,6 +53,9 @@ ID {LETTER}({LETTER}|{DIGIT})*
 '(\\.|[^'\\\n]){2,}' {addErr("Invalid char literal (too many characters): "+string(yytext));}
 '(\\.|[^'\\\n])* {addErr("Unterminated char literal: "+string(yytext));}
 
+0[xX][0-9a-fA-F]+ {addTok("INT_LITERAL"); return INT_LITERAL;}
+0[bB][01]+ {addTok("INT_LITERAL"); return INT_LITERAL;}
+
 {DIGIT}+"."{DIGIT}+([eE][+-]?{DIGIT}+)? {addTok("FLOAT_LITERAL"); return FLOAT_LITERAL;}
 {DIGIT}+[eE][+-]?{DIGIT}+ {addTok("FLOAT_LITERAL"); return FLOAT_LITERAL;}
 {DIGIT}+{LETTER}({LETTER}|{DIGIT})* {addErr("Invalid number/identifier (digit-led): "+string(yytext));}
