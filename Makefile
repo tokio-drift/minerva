@@ -12,7 +12,7 @@ PARSER_GEN := $(BUILD_DIR)/parser.tab.cpp
 PARSER_HDR := $(BUILD_DIR)/parser.tab.h
 TARGET    := minerva
 
-.PHONY: all clean run
+.PHONY: all clean run conflicts
 
 all: $(TARGET)
 
@@ -38,3 +38,7 @@ clean:
 
 run: $(TARGET)
 	./$(TARGET) $(FILE)
+
+conflicts:
+	mkdir -p $(BUILD_DIR)
+	$(BISON) -d --defines=$(BUILD_DIR)/parser.conflicts.h -o $(BUILD_DIR)/parser.conflicts.cpp $(PARSER_FILE) -Wcounterexamples --report=solved
