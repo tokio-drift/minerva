@@ -12,7 +12,7 @@ PARSER_GEN := $(BUILD_DIR)/parser.tab.cpp
 PARSER_HDR := $(BUILD_DIR)/parser.tab.h
 TARGET    := minerva
 
-.PHONY: all clean run conflicts
+.PHONY: all clean run conflicts summ_conflicts
 
 all: $(TARGET)
 
@@ -42,3 +42,6 @@ run: $(TARGET)
 conflicts:
 	mkdir -p $(BUILD_DIR)
 	$(BISON) -d --defines=$(BUILD_DIR)/parser.conflicts.h -o $(BUILD_DIR)/parser.conflicts.cpp $(PARSER_FILE) -Wcounterexamples --report=solved
+
+summ_conflicts: 
+	python3 scripts/summarize_conflicts.py
