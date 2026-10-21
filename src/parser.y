@@ -12,25 +12,11 @@
 #include <cstring>
 #include <initializer_list>
 
+#include "frontend.h"
+
 using namespace std;
 
-struct TokEntry{
-    int line;
-    string lexeme;
-    string token;
-};
-struct ErrEntry{
-    int line;
-    int col;
-    string message;
-};
-
-static vector<TokEntry> g_tokens;
-static vector<ErrEntry> g_errors;
 int g_commentStartLine = 0;
-
-// Result of a successful parse. Owned here; destroyed with g_program.reset().
-static unique_ptr<Program> g_program;
 
 extern int yylineno;
 extern char *yytext;
@@ -38,7 +24,6 @@ extern FILE *yyin;
 extern YYLTYPE yylloc;
 int yylex(void);
 void yyerror(const char *msg);
-void resetLexerState();
 int yylex_destroy(void);
 
 void addTok(const string &tokName){
@@ -57,32 +42,6 @@ static void retagRecentToken(int line, const string &lexeme, const string &role)
     }
 }
 
-#define RED "\033[1;31m"
-#define GREEN "\033[1;32m"
-#define ENDCLR "\033[0m"
-
-static void printTokenTable() {
-    cout<<GREEN<<"\nTOKEN TABLE\n"<<ENDCLR;
-    cout<<left<<setw(8)<<"LINE"<<setw(24)<<"LEXEME"<<setw(22)<<"TOKEN"<<"\n";
-    cout<<string(50, '-')<<"\n";
-    for (auto &t : g_tokens){
-        cout<<left<<setw(8)<<t.line<<setw(24)<<t.lexeme<<setw(22)<<t.token<<"\n";
-    }
-    cout<<string(50,'-')<<"\n";
-    cout<<"Total tokens: "<<g_tokens.size()<<"\n";
-    cout<<"Status: "<<GREEN<<"VALID"<<ENDCLR<<" (0 errors)\n";
-}
-
-static void printErrorReport() {
-    cout<<RED<<"\nSYNTAX/LEXICAL ERRORS\n"<<ENDCLR;
-    for (auto &e : g_errors) {
-        cout<<"Line "<<e.line<<", col "<<e.col<<": "<<e.message<<"\n";
-    }
-    cout<<string(50, '-')<<"\n";
-    cout<<"Total errors: "<<g_errors.size()<<"\n";
-    cout<<"Status: "<<RED<<"INVALID\n"<<ENDCLR;
-}
-
 /* ---------- AST construction helpers (ownership: see ast.h) ---------- */
 static SrcLoc L(const YYLTYPE &l) { return SrcLoc{l.first_line, l.first_column}; }
 static string S(const char *s) { return s ? string(s) : string(); }
@@ -98,13 +57,22 @@ static NodeList *appendAll(NodeList *dst, NodeList *src) {
 // Move the contents out of a heap list and free the list object.
 static NodeList take(NodeList *l) { NodeList r = std::move(*l); delete l; return r; }
 
-static Node *unsupN(SrcLoc l, const string &what, initializer_list<Node *> kids) {
+static Node *unsupN(SrcLoc l, UnsupKind kind, const string &what, initializer_list<Node *> kids) {
     NodeList k;
     for (Node *n : kids) k.emplace_back(n);
-    return new Unsupported(l, what, std::move(k));
+    return new Unsupported(l, kind, what, std::move(k));
 }
-static Node *unsupL(SrcLoc l, const string &what, NodeList *kids) {
-    return new Unsupported(l, what, take(kids));
+static Node *unsupL(SrcLoc l, UnsupKind kind, const string &what, NodeList *kids) {
+    return new Unsupported(l, kind, what, take(kids));
+}
+static void setName(Node *n, const string &name) {
+    if (n) static_cast<Unsupported *>(n)->name = name;
+}
+static void setDeclVar(Node *n, const string &name) {
+    if (n) static_cast<Unsupported *>(n)->declVar = name;
+}
+static void setBaseName(Node *n, const string &name) {
+    if (n) static_cast<Unsupported *>(n)->baseName = name;
 }
 
 static TypeSpec *mkType(const string &base) { auto *t = new TypeSpec(); t->base = base; return t; }
@@ -277,7 +245,8 @@ type_name
 
 declaration
     : full_type init_declarator_list ';' { $$ = makeDeclStmt(L(@1), $1, $2); }
-    | TYPEDEF full_type init_declarator_list ';' { $$ = unsupN(L(@1), "typedef", {makeDeclStmt(L(@2), $2, $3)}); }
+    | TYPEDEF full_type init_declarator_list ';' {
+          $$ = unsupN(L(@1), UnsupKind::Typedef, "typedef", {makeDeclStmt(L(@2), $2, $3)}); }
     ;
 
 local_type
@@ -306,7 +275,7 @@ local_declarators
 
 local_declaration
     : local_declarators ';' { $$ = $1; }
-    | TYPEDEF local_declarators ';' { $$ = unsupN(L(@1), "typedef", {$2}); }
+    | TYPEDEF local_declarators ';' { $$ = unsupN(L(@1), UnsupKind::Typedef, "typedef", {$2}); }
     ;
 
 init_declarator_list
@@ -369,19 +338,27 @@ initializer_list
 
 
 struct_definition
-    : STRUCT IDENTIFIER '{' member_list_opt '}' ';' { $$ = unsupL(L(@1), "struct " + S($2), $4); }
+    : STRUCT IDENTIFIER '{' member_list_opt '}' ';' {
+          $$ = unsupL(L(@1), UnsupKind::Struct, "struct " + S($2), $4);
+          setName($$, S($2)); }
     | STRUCT IDENTIFIER '{' member_list_opt '}' IDENTIFIER ';' {
-          $$ = unsupL(L(@1), "struct " + S($2) + " declaring " + S($6), $4); }
+          $$ = unsupL(L(@1), UnsupKind::Struct, "struct " + S($2) + " declaring " + S($6), $4);
+          setName($$, S($2)); setDeclVar($$, S($6)); }
     | TYPEDEF STRUCT IDENTIFIER '{' member_list_opt '}' IDENTIFIER ';' {
-          $$ = unsupL(L(@1), "typedef struct " + S($3) + " as " + S($7), $5); }
+          $$ = unsupL(L(@1), UnsupKind::TypedefAggregate, "typedef struct " + S($3) + " as " + S($7), $5);
+          setName($$, S($3)); setDeclVar($$, S($7)); }
     ;
 
 union_definition
-    : UNION IDENTIFIER '{' member_list_opt '}' ';' { $$ = unsupL(L(@1), "union " + S($2), $4); }
+    : UNION IDENTIFIER '{' member_list_opt '}' ';' {
+          $$ = unsupL(L(@1), UnsupKind::Union, "union " + S($2), $4);
+          setName($$, S($2)); }
     | UNION IDENTIFIER '{' member_list_opt '}' IDENTIFIER ';' {
-          $$ = unsupL(L(@1), "union " + S($2) + " declaring " + S($6), $4); }
+          $$ = unsupL(L(@1), UnsupKind::Union, "union " + S($2) + " declaring " + S($6), $4);
+          setName($$, S($2)); setDeclVar($$, S($6)); }
     | TYPEDEF UNION IDENTIFIER '{' member_list_opt '}' IDENTIFIER ';' {
-          $$ = unsupL(L(@1), "typedef union " + S($3) + " as " + S($7), $5); }
+          $$ = unsupL(L(@1), UnsupKind::TypedefAggregate, "typedef union " + S($3) + " as " + S($7), $5);
+          setName($$, S($3)); setDeclVar($$, S($7)); }
     ;
 
 member_list_opt
@@ -395,21 +372,28 @@ member_list
     ;
 
 enum_definition
-    : ENUM IDENTIFIER '{' enumerator_list '}' ';' { $$ = unsupL(L(@1), "enum " + S($2), $4); }
+    : ENUM IDENTIFIER '{' enumerator_list '}' ';' {
+          $$ = unsupL(L(@1), UnsupKind::Enum, "enum " + S($2), $4);
+          setName($$, S($2)); }
     ;
 
 enumerator_list
-    : IDENTIFIER { $$ = newList(unsupN(L(@1), "enumerator " + S($1), {})); }
-    | IDENTIFIER '=' assignment_expression { $$ = newList(unsupN(L(@1), "enumerator " + S($1), {$3})); }
-    | enumerator_list ',' IDENTIFIER { $$ = append($1, unsupN(L(@3), "enumerator " + S($3), {})); }
+    : IDENTIFIER { $$ = newList(unsupN(L(@1), UnsupKind::Other, "enumerator " + S($1), {})); }
+    | IDENTIFIER '=' assignment_expression {
+          $$ = newList(unsupN(L(@1), UnsupKind::Other, "enumerator " + S($1), {$3})); }
+    | enumerator_list ',' IDENTIFIER {
+          $$ = append($1, unsupN(L(@3), UnsupKind::Other, "enumerator " + S($3), {})); }
     | enumerator_list ',' IDENTIFIER '=' assignment_expression {
-          $$ = append($1, unsupN(L(@3), "enumerator " + S($3), {$5})); }
+          $$ = append($1, unsupN(L(@3), UnsupKind::Other, "enumerator " + S($3), {$5})); }
     ;
 
 class_definition
-    : CLASS IDENTIFIER '{' class_member_list_opt '}' ';' { $$ = unsupL(L(@1), "class " + S($2), $4); }
+    : CLASS IDENTIFIER '{' class_member_list_opt '}' ';' {
+          $$ = unsupL(L(@1), UnsupKind::Class, "class " + S($2), $4);
+          setName($$, S($2)); }
     | CLASS IDENTIFIER ':' access_specifier IDENTIFIER '{' class_member_list_opt '}' ';' {
-          $$ = unsupL(L(@1), "class " + S($2) + " : " + S($4) + " " + S($5), $7); }
+          $$ = unsupL(L(@1), UnsupKind::Class, "class " + S($2) + " : " + S($4) + " " + S($5), $7);
+          setName($$, S($2)); setBaseName($$, S($5)); }
     ;
 
 class_member_list_opt
@@ -423,7 +407,7 @@ class_member_list
     ;
 
 class_member
-    : access_specifier ':' { $$ = unsupN(L(@1), "access " + S($1), {}); }
+    : access_specifier ':' { $$ = unsupN(L(@1), UnsupKind::Other, "access " + S($1), {}); }
     | declaration { $$ = $1; }
     | function_definition { $$ = $1; }
     ;
@@ -499,9 +483,9 @@ statement
     ;
 
 labeled_statement
-    : IDENTIFIER ':' statement { $$ = unsupN(L(@1), "label " + S($1), {$3}); }
-    | CASE constant_expression ':' statement { $$ = unsupN(L(@1), "case", {$2, $4}); }
-    | DEFAULT ':' statement { $$ = unsupN(L(@1), "default", {$3}); }
+    : IDENTIFIER ':' statement { $$ = new Label(L(@1), S($1), $3); }
+    | CASE constant_expression ':' statement { $$ = unsupN(L(@1), UnsupKind::Case, "case", {$2, $4}); }
+    | DEFAULT ':' statement { $$ = unsupN(L(@1), UnsupKind::Default, "default", {$3}); }
     ;
 
 expression_statement
@@ -509,18 +493,22 @@ expression_statement
     ;
 
 selection_statement
-    : IF '(' expression ')' statement %prec LOWER_THAN_ELSE { $$ = unsupN(L(@1), "if", {$3, $5}); }
-    | IF '(' expression ')' statement ELSE statement { $$ = unsupN(L(@1), "if-else", {$3, $5, $7}); }
+    : IF '(' expression ')' statement %prec LOWER_THAN_ELSE {
+          $$ = unsupN(L(@1), UnsupKind::If, "if", {$3, $5}); }
+    | IF '(' expression ')' statement ELSE statement {
+          $$ = unsupN(L(@1), UnsupKind::IfElse, "if-else", {$3, $5, $7}); }
     | SWITCH '(' expression ')' '{' statement_list_opt '}' {
-          $$ = unsupL(L(@1), "switch", appendAll(newList($3), $6)); }
+          $$ = unsupL(L(@1), UnsupKind::Switch, "switch", appendAll(newList($3), $6)); }
     ;
 
 iteration_statement
-    : WHILE '(' expression ')' statement { $$ = unsupN(L(@1), "while", {$3, $5}); }
-    | DO statement WHILE '(' expression ')' ';' { $$ = unsupN(L(@1), "do-while", {$2, $5}); }
-    | DO statement UNTIL '(' expression ')' ';' { $$ = unsupN(L(@1), "do-until", {$2, $5}); }
+    : WHILE '(' expression ')' statement { $$ = unsupN(L(@1), UnsupKind::While, "while", {$3, $5}); }
+    | DO statement WHILE '(' expression ')' ';' {
+          $$ = unsupN(L(@1), UnsupKind::DoWhile, "do-while", {$2, $5}); }
+    | DO statement UNTIL '(' expression ')' ';' {
+          $$ = unsupN(L(@1), UnsupKind::DoUntil, "do-until", {$2, $5}); }
     | FOR '(' for_init_opt ';' expression_opt ';' expression_opt ')' statement {
-          $$ = unsupN(L(@1), "for", {$3, $5, $7, $9}); }
+          $$ = unsupN(L(@1), UnsupKind::For, "for", {$3, $5, $7, $9}); }
     ;
 
 for_init_opt
@@ -535,22 +523,28 @@ expression_opt
     ;
 
 jump_statement
-    : GOTO IDENTIFIER ';' { $$ = unsupN(L(@1), "goto " + S($2), {}); }
-    | CONTINUE ';' { $$ = unsupN(L(@1), "continue", {}); }
-    | BREAK ';' { $$ = unsupN(L(@1), "break", {}); }
+    : GOTO IDENTIFIER ';' { $$ = new Goto(L(@1), S($2)); }
+    | CONTINUE ';' { $$ = new Continue(L(@1)); }
+    | BREAK ';' { $$ = new Break(L(@1)); }
     | RETURN ';' { $$ = new Return(L(@1), nullptr); }
     | RETURN expression ';' { $$ = new Return(L(@1), $2); }
     ;
 
 io_statement
-    : PRINTF '(' argument_list_opt ')' ';' { $$ = unsupL(L(@1), "printf", $3); }
-    | SCANF '(' argument_list_opt ')' ';' { $$ = unsupL(L(@1), "scanf", $3); }
+    : PRINTF '(' argument_list_opt ')' ';' { $$ = unsupL(L(@1), UnsupKind::Printf, "printf", $3); }
+    | SCANF '(' argument_list_opt ')' ';' { $$ = unsupL(L(@1), UnsupKind::Scanf, "scanf", $3); }
     ;
 
 snapshot_statement
-    : SNAPSHOT IDENTIFIER ';' { $$ = unsupN(L(@1), "snapshot " + S($2), {}); }
-    | REWIND IDENTIFIER ';' { $$ = unsupN(L(@1), "rewind " + S($2), {}); }
-    | REWIND IDENTIFIER ',' expression ';' { $$ = unsupN(L(@1), "rewind " + S($2), {$4}); }
+    : SNAPSHOT IDENTIFIER ';' {
+          $$ = unsupN(L(@1), UnsupKind::Snapshot, "snapshot " + S($2), {});
+          setName($$, S($2)); }
+    | REWIND IDENTIFIER ';' {
+          $$ = unsupN(L(@1), UnsupKind::Rewind, "rewind " + S($2), {});
+          setName($$, S($2)); }
+    | REWIND IDENTIFIER ',' expression ';' {
+          $$ = unsupN(L(@1), UnsupKind::Rewind, "rewind " + S($2), {$4});
+          setName($$, S($2)); }
     ;
 
 
@@ -586,7 +580,8 @@ assignment_expression
     | unary_expression XOR_ASSIGN assignment_expression { $$ = new Assign(L(@2), "^=", $1, $3); }
     | unary_expression SHL_ASSIGN assignment_expression { $$ = new Assign(L(@2), "<<=", $1, $3); }
     | unary_expression SHR_ASSIGN assignment_expression { $$ = new Assign(L(@2), ">>=", $1, $3); }
-    | unary_expression SWAP_OP unary_expression { $$ = unsupN(L(@2), "swap <->", {$1, $3}); }
+    | unary_expression SWAP_OP unary_expression {
+          $$ = unsupN(L(@2), UnsupKind::Swap, "swap <->", {$1, $3}); }
     ;
 
 conditional_expression
@@ -662,12 +657,14 @@ multiplicative_expression
 
 pipe_expression
     : unary_expression { $$ = $1; }
-    | pipe_expression PIPE_OP unary_expression { $$ = unsupN(L(@2), "pipe |>", {$1, $3}); }
+    | pipe_expression PIPE_OP unary_expression {
+          $$ = unsupN(L(@2), UnsupKind::Pipe, "pipe |>", {$1, $3}); }
     ;
 
 unary_expression
     : postfix_expression { $$ = $1; }
-    | '(' type_name ')' unary_expression { $$ = unsupN(L(@1), "cast " + takeTypeStr($2), {$4}); }
+    | '(' type_name ')' unary_expression {
+          $$ = unsupN(L(@1), UnsupKind::Cast, "cast " + takeTypeStr($2), {$4}); }
     | INC_OP unary_expression {
           retagRecentToken(@1.first_line, "++", "PREFIX_INCREMENT");
           $$ = new Unary(L(@1), "++", $2); }
@@ -692,20 +689,31 @@ unary_expression
     | '&' unary_expression %prec UNARY {
           retagRecentToken(@1.first_line, "&", "ADDRESS_OF");
           $$ = new Unary(L(@1), "&", $2); }
-    | SIZEOF '(' type_name ')' { $$ = unsupN(L(@1), "sizeof-type " + takeTypeStr($3), {}); }
-    | SIZEOF '(' expression ')' { $$ = unsupN(L(@1), "sizeof-expr", {$3}); }
-    | NEW IDENTIFIER '(' argument_list_opt ')' { $$ = unsupL(L(@1), "new " + S($2), $4); }
-    | NEW IDENTIFIER { $$ = unsupN(L(@1), "new " + S($2), {}); }
-    | DELETE unary_expression { $$ = unsupN(L(@1), "delete", {$2}); }
+    | SIZEOF '(' type_name ')' {
+          $$ = unsupN(L(@1), UnsupKind::Sizeof, "sizeof-type " + takeTypeStr($3), {}); }
+    | SIZEOF '(' expression ')' { $$ = unsupN(L(@1), UnsupKind::Sizeof, "sizeof-expr", {$3}); }
+    | NEW IDENTIFIER '(' argument_list_opt ')' {
+          $$ = unsupL(L(@1), UnsupKind::New, "new " + S($2), $4);
+          setName($$, S($2)); }
+    | NEW IDENTIFIER {
+          $$ = unsupN(L(@1), UnsupKind::New, "new " + S($2), {});
+          setName($$, S($2)); }
+    | DELETE unary_expression { $$ = unsupN(L(@1), UnsupKind::Delete, "delete", {$2}); }
     ;
 
 postfix_expression
     : primary_expression { $$ = $1; }
     | postfix_expression '[' expression ']' { $$ = new Index(L(@2), $1, $3); }
     | postfix_expression '(' argument_list_opt ')' { $$ = new Call(L(@2), $1, take($3)); }
-    | postfix_expression '.' IDENTIFIER { $$ = unsupN(L(@2), "member ." + S($3), {$1}); }
-    | postfix_expression ARROW_OP IDENTIFIER { $$ = unsupN(L(@2), "member ->" + S($3), {$1}); }
-    | postfix_expression SCOPE_OP IDENTIFIER { $$ = unsupN(L(@2), "scope ::" + S($3), {$1}); }
+    | postfix_expression '.' IDENTIFIER {
+          $$ = unsupN(L(@2), UnsupKind::Member, "member ." + S($3), {$1});
+          setName($$, S($3)); }
+    | postfix_expression ARROW_OP IDENTIFIER {
+          $$ = unsupN(L(@2), UnsupKind::Member, "member ->" + S($3), {$1});
+          setName($$, S($3)); }
+    | postfix_expression SCOPE_OP IDENTIFIER {
+          $$ = unsupN(L(@2), UnsupKind::Scope, "scope ::" + S($3), {$1});
+          setName($$, S($3)); }
     | postfix_expression INC_OP {
           retagRecentToken(@2.first_line, "++", "POSTFIX_INCREMENT");
           $$ = new Postfix(L(@2), "++", $1); }
@@ -727,16 +735,16 @@ primary_expression
 
 lambda_capture
     : /* empty */ { $$ = newList(); }
-    | '=' { $$ = newList(unsupN(L(@1), "capture-by-value-all", {})); }
-    | '&' { $$ = newList(unsupN(L(@1), "capture-by-ref-all", {})); }
+    | '=' { $$ = newList(unsupN(L(@1), UnsupKind::Lambda, "capture-by-value-all", {})); }
+    | '&' { $$ = newList(unsupN(L(@1), UnsupKind::Lambda, "capture-by-ref-all", {})); }
     | argument_list { $$ = $1; }
     ;
 
 lambda_expression
     : '[' lambda_capture ']' '(' parameter_list_opt ')' compound_statement {
-          $$ = unsupL(L(@1), "lambda", append(appendAll($2, $5), $7)); }
+          $$ = unsupL(L(@1), UnsupKind::Lambda, "lambda", append(appendAll($2, $5), $7)); }
     | '[' lambda_capture ']' compound_statement {
-          $$ = unsupL(L(@1), "lambda", append($2, $4)); }
+          $$ = unsupL(L(@1), UnsupKind::Lambda, "lambda", append($2, $4)); }
     ;
 
 %%
@@ -745,65 +753,3 @@ void yyerror(const char *msg){
     addErr(string(msg) + " near '" + string(yytext) + "'");
 }
 
-static void usage(const char *prog) {
-    cerr << "Usage: " << prog << " [--dump-ast] <source-file>\n";
-}
-
-int main(int argc, char **argv) {
-    bool dumpTree = false;
-    const char *path = nullptr;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--dump-ast") == 0) {
-            dumpTree = true;
-        } else if (!path) {
-            path = argv[i];
-        } else {
-            usage(argv[0]);
-            return 1;
-        }
-    }
-    if (!path) {
-        usage(argv[0]);
-        return 1;
-    }
-    FILE *f = fopen(path, "r");
-    if (!f) {
-        cerr << "Error: cannot open file '" << path << "'\n";
-        return 1;
-    }
-
-    resetLexerState();
-    yyin = f;
-    int rc = yyparse();
-    yylex_destroy();   // free flex's buffer stack (also required before a second compilation)
-    fclose(f);
-
-    // A parser abort (syntax error, memory exhaustion) must never look like success.
-    if (rc != 0 && g_errors.empty()) {
-        g_errors.push_back({yylineno, yylloc.first_column,
-                            "parser aborted with status " + to_string(rc)});
-    }
-    if (g_errors.empty() && !g_program) {
-        g_errors.push_back({yylineno, yylloc.first_column, "internal error: no AST was produced"});
-    }
-
-    if (!g_errors.empty()) {
-        g_program.reset();
-        resetInterned();
-        printErrorReport();
-        return 2;
-    }
-
-    if (dumpTree) {
-        dumpAst(*g_program, cout);
-    } else {
-        printTokenTable();
-    }
-    size_t unsup = countUnsupported(*g_program);
-    if (unsup > 0) {
-        cerr << "note: " << unsup << " construct(s) parsed but not yet supported by later stages\n";
-    }
-    g_program.reset();
-    resetInterned();
-    return 0;
-}

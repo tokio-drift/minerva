@@ -1,0 +1,17 @@
+int main() {
+    int i = 1;
+    char c = 'a';
+    float f = 2.5;
+    short s = 3;
+    unsigned u = 4;
+    int promoted = c + s;
+    float mixed = i + f;
+    int conditional = (i > 0) ? i : 0;
+    int logical = (i > 0) && (u > 0);
+    int shifted = i << 2;
+    int bitwise = (i & u) | (i ^ u);
+    int negated = -i;
+    int inverted = ~u;
+    int complemented = !logical;
+    return promoted + conditional + logical + shifted + bitwise + negated + inverted + complemented;
+}

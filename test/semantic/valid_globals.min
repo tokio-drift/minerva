@@ -1,0 +1,12 @@
+int counter = 0;
+static int seed = 5;
+
+int bump(int amount) {
+    counter = counter + amount;
+    return counter;
+}
+
+int main() {
+    bump(seed);
+    return counter;
+}

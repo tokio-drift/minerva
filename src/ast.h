@@ -23,7 +23,18 @@ enum class NodeKind {
     Block, DeclStmt, ExprStmt, EmptyStmt, Return,
     IntLit, FloatLit, CharLit, StringLit, NullLit, Ident,
     Unary, Postfix, Binary, Assign, Conditional, Call, Index, InitList,
-    Unsupported   
+    Break, Continue, Goto, Label,
+    Unsupported
+};
+
+// Construct kind of a node the parser recognises but does not lower yet.
+enum class UnsupKind {
+    Other,
+    If, IfElse, While, DoWhile, DoUntil, For, Switch,
+    Struct, Union, Enum, Class, Typedef, TypedefAggregate,
+    Printf, Scanf, Snapshot, Rewind,
+    New, Delete, Cast, Sizeof, Pipe, Swap,
+    Member, Scope, Lambda, Case, Default
 };
 
 struct Node;
@@ -151,11 +162,34 @@ struct InitList : Node {             // { a, b, c }
     InitList(SrcLoc l, NodeList e) : Node(NodeKind::InitList, l), elems(std::move(e)) {}
 };
 
+struct Break : Node {
+    explicit Break(SrcLoc l) : Node(NodeKind::Break, l) {}
+};
+
+struct Continue : Node {
+    explicit Continue(SrcLoc l) : Node(NodeKind::Continue, l) {}
+};
+
+struct Goto : Node {
+    std::string name;
+    Goto(SrcLoc l, std::string n) : Node(NodeKind::Goto, l), name(std::move(n)) {}
+};
+
+struct Label : Node {
+    std::string name;
+    NodeP stmt;
+    Label(SrcLoc l, std::string n, Node *s) : Node(NodeKind::Label, l), name(std::move(n)), stmt(s) {}
+};
+
 struct Unsupported : Node {
     std::string what;
+    UnsupKind kind = UnsupKind::Other;
+    std::string name;                 // declared type name, member or captured name
+    std::string declVar;              // variable or alias declared with the construct
+    std::string baseName;             // base class of a class definition
     NodeList kids;                   // sub-nodes that were already built (entries may be null)
-    Unsupported(SrcLoc l, std::string w, NodeList k)
-        : Node(NodeKind::Unsupported, l), what(std::move(w)), kids(std::move(k)) {}
+    Unsupported(SrcLoc l, UnsupKind k, std::string w, NodeList kids)
+        : Node(NodeKind::Unsupported, l), what(std::move(w)), kind(k), kids(std::move(kids)) {}
 };
 
 

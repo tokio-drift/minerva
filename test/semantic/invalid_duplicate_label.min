@@ -1,0 +1,9 @@
+int main() {
+    int value = 0;
+first:
+    value = value + 1;
+    goto first;
+first:
+    value = value + 2;
+    return value;
+}

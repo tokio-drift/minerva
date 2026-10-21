@@ -1,0 +1,10 @@
+struct Point {
+    int x;
+};
+
+int main() {
+    struct Point p;
+    int value = 1;
+    value = Point;
+    return value;
+}

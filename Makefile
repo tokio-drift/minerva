@@ -11,10 +11,10 @@ LEX_GEN   := $(BUILD_DIR)/lex.yy.cpp
 PARSER_GEN := $(BUILD_DIR)/parser.tab.cpp
 PARSER_HDR := $(BUILD_DIR)/parser.tab.h
 TARGET    := minerva
-AST_SRC   := $(SRC_DIR)/ast.cpp
-AST_HDR   := $(SRC_DIR)/ast.h
+CORE_SRC  := $(SRC_DIR)/ast.cpp $(SRC_DIR)/types.cpp $(SRC_DIR)/semantic.cpp $(SRC_DIR)/main.cpp
+CORE_HDR  := $(SRC_DIR)/ast.h $(SRC_DIR)/types.h $(SRC_DIR)/semantic.h $(SRC_DIR)/frontend.h
 
-.PHONY: all clean run conflicts summ_conflicts asan test-ast
+.PHONY: all clean run conflicts summ_conflicts asan test test-ast test-semantic
 
 all: $(TARGET)
 
@@ -32,16 +32,22 @@ $(PARSER_HDR): $(PARSER_GEN)
 $(LEX_GEN): $(LEX_FILE) $(PARSER_HDR)
 	$(FLEX) -o $(LEX_GEN) $(LEX_FILE)
 
-$(TARGET): $(LEX_GEN) $(PARSER_GEN) $(AST_SRC) $(AST_HDR)
-	$(CXX) $(CXXFLAGS) $(LEX_GEN) $(PARSER_GEN) $(AST_SRC) -o $(TARGET) -lfl
+$(TARGET): $(LEX_GEN) $(PARSER_GEN) $(CORE_SRC) $(CORE_HDR)
+	$(CXX) $(CXXFLAGS) $(LEX_GEN) $(PARSER_GEN) $(CORE_SRC) -o $(TARGET) -lfl
 
 # Sanitizer build (AddressSanitizer + UBSan); output: ./minerva_asan
-asan: $(LEX_GEN) $(PARSER_GEN) $(AST_SRC) $(AST_HDR)
-	$(CXX) $(CXXFLAGS) -g -fsanitize=address,undefined -fno-omit-frame-pointer $(LEX_GEN) $(PARSER_GEN) $(AST_SRC) -o minerva_asan
+asan: $(LEX_GEN) $(PARSER_GEN) $(CORE_SRC) $(CORE_HDR)
+	$(CXX) $(CXXFLAGS) -g -fsanitize=address,undefined -fno-omit-frame-pointer $(LEX_GEN) $(PARSER_GEN) $(CORE_SRC) -o minerva_asan
 
 # Golden AST tests (Phase 1)
 test-ast: $(TARGET)
-	./test/ast_tests.sh ./$(TARGET)
+	bash test/ast_tests.sh ./$(TARGET)
+
+# Semantic analysis tests (Phase 2)
+test-semantic: $(TARGET)
+	bash test/semantic_tests.sh ./$(TARGET)
+
+test: test-ast test-semantic
 
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET) minerva_asan

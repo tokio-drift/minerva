@@ -54,6 +54,12 @@ static void forEachChild(const Node &n, const std::function<void(const Node *)> 
     case NodeKind::Index: {
         auto &x = static_cast<const Index &>(n); f(x.base.get()); f(x.index.get()); break;
     }
+    case NodeKind::Break:    break;
+    case NodeKind::Continue: break;
+    case NodeKind::Goto:     break;
+    case NodeKind::Label: {
+        auto &x = static_cast<const Label &>(n); f(x.stmt.get()); break;
+    }
     case NodeKind::InitList:    list(static_cast<const InitList &>(n).elems); break;
     case NodeKind::Unsupported: list(static_cast<const Unsupported &>(n).kids); break;
     default: break;   // leaves: Directive, EmptyStmt, literals, Ident
@@ -172,6 +178,17 @@ static void dumpNode(const Node *n, std::ostream &os, int d) {
         auto *x = static_cast<const Index *>(n);
         pad(os, d); os << "Index\n";
         dumpNode(x->base.get(), os, d + 1); dumpNode(x->index.get(), os, d + 1); break;
+    }
+    case NodeKind::Break:    pad(os, d); os << "Break\n"; break;
+    case NodeKind::Continue: pad(os, d); os << "Continue\n"; break;
+    case NodeKind::Goto: {
+        auto *x = static_cast<const Goto *>(n);
+        pad(os, d); os << "Goto " << x->name << '\n'; break;
+    }
+    case NodeKind::Label: {
+        auto *x = static_cast<const Label *>(n);
+        pad(os, d); os << "Label " << x->name << '\n';
+        dumpNode(x->stmt.get(), os, d + 1); break;
     }
     case NodeKind::InitList:
         pad(os, d); os << "InitList\n";

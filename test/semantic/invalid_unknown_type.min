@@ -1,0 +1,4 @@
+int main() {
+    Missing value = 1;
+    return value;
+}

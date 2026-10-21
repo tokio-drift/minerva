@@ -1,0 +1,8 @@
+int *pointer_to_int(int value) {
+    return value;
+}
+
+int main() {
+    int *p = pointer_to_int(1);
+    return 0;
+}

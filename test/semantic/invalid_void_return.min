@@ -1,0 +1,12 @@
+void nothing() {
+    return 5;
+}
+
+int missing() {
+    return;
+}
+
+int main() {
+    nothing();
+    return missing();
+}

@@ -1,0 +1,6 @@
+int shared = 1;
+int shared = 2;
+
+int main() {
+    return shared;
+}

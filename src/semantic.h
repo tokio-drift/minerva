@@ -1,0 +1,82 @@
+// semantic.h - symbol table, type checking and diagnostics
+#pragma once
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "ast.h"
+#include "types.h"
+
+struct Diagnostic {
+    SrcLoc loc;
+    std::string category;
+    std::string message;
+};
+
+enum class ExprCategory {
+    RValue,
+    LValue,
+    Void
+};
+
+struct ExprInfo {
+    TypeRef type;
+    ExprCategory category = ExprCategory::RValue;
+};
+
+class Analyzer {
+public:
+    void analyze(const Program &program);
+
+    bool failed() const { return !diagnostics_.empty(); }
+    const std::vector<Diagnostic> &diagnostics() const { return diagnostics_; }
+
+private:
+    struct Symbol {
+        enum class Kind { Variable, Function, TypeName };
+        Kind kind = Kind::Variable;
+        TypeRef type;
+        bool defined = false;
+        SrcLoc loc;
+    };
+
+    void error(const SrcLoc &loc, const std::string &category, const std::string &message);
+
+    void registerAggregates(const Program &program);
+    void registerFunctions(const Program &program);
+    void checkFunction(const FuncDef &fn);
+    void checkDeclaration(const VarDecl &decl);
+    void checkStatement(Node *node);
+    void checkUnsupported(const Unsupported &node);
+    void checkReturn(const Return &node);
+    void checkCondition(Node *cond, const SrcLoc &loc);
+
+    ExprInfo checkExpression(Node *node);
+    ExprInfo checkIdent(const Ident &node);
+    ExprInfo checkUnary(const Unary &node);
+    ExprInfo checkPostfix(const Postfix &node);
+    ExprInfo checkBinary(const Binary &node);
+    ExprInfo checkAssign(const Assign &node);
+    ExprInfo checkConditional(const Conditional &node);
+    ExprInfo checkCall(const Call &node);
+    ExprInfo checkIndex(const Index &node);
+
+    TypeRef resolveType(const TypeSpec &spec, const SrcLoc &loc);
+    TypeRef typeOfDecl(const VarDecl &decl, const SrcLoc &loc);
+    void checkInitializer(const VarDecl &decl, const TypeRef &type);
+
+    const Symbol *lookup(const std::string &name) const;
+    bool declareVariable(const std::string &name, TypeRef type, const SrcLoc &loc);
+    bool declareFunction(const std::string &name, TypeRef type, const SrcLoc &loc);
+    bool declareTypeName(const std::string &name, TypeRef type, const SrcLoc &loc);
+
+    static ExprInfo decay(ExprInfo value);
+
+    std::vector<Diagnostic> diagnostics_;    std::vector<std::unordered_map<std::string, Symbol>> scopes_;
+    std::unordered_map<std::string, SrcLoc> labels_;
+    std::vector<std::pair<std::string, SrcLoc>> pendingGotos_;
+    std::unordered_map<const FuncDef *, TypeRef> functionTypes_;
+    TypeRef currentReturn_;
+    int loopDepth_ = 0;
+    int switchDepth_ = 0;
+};

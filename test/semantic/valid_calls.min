@@ -1,0 +1,15 @@
+int add(int a, int b) {
+    return a + b;
+}
+
+int scale(int value, int factor) {
+    return value * factor;
+}
+
+int main() {
+    int total = 0;
+    int step = 3;
+    total = add(total, step);
+    total = scale(total, 2);
+    return total;
+}

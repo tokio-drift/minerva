@@ -2,6 +2,7 @@
 #include <string>
 #include <cstdlib>
 #include "parser.tab.h"
+#include "frontend.h"
 
 using namespace std;
 
@@ -20,8 +21,6 @@ void resetLexerState() { g_col = 1; yylineno = 1; }
 /* Token with a semantic value: the lexeme is interned (pool owned by ast.cpp). */
 #define RET_VAL(name, tok) { addTok(name); yylval.sval = internStr(yytext); return tok; }
 
-extern void addTok(const string &tokName);
-extern void addErr(const string &msg);
 extern int g_commentStartLine;
 %}
 

@@ -1,0 +1,34 @@
+# Phase 2 semantic analysis cases.
+# file <TAB> expected exit status <TAB> expected diagnostic categories ("-" = none)
+valid_calls.min	0	-
+valid_shadowing.min	0	-
+valid_recursion.min	0	-
+valid_pointers.min	0	-
+valid_arrays.min	0	-
+valid_globals.min	0	-
+valid_types.min	0	-
+valid_control_flow.min	0	-
+valid_aggregates.min	0	-
+valid_pending_constructs.min	0	-
+invalid_undeclared.min	3	undeclared
+invalid_duplicate_var.min	3	redeclaration
+invalid_duplicate_func.min	3	redefinition
+invalid_call_arity.min	3	call-arity
+invalid_arg_type.min	3	type-mismatch
+invalid_return_type.min	3	type-mismatch
+invalid_operand_types.min	3	invalid-operand
+invalid_break.min	3	invalid-break
+invalid_continue.min	3	invalid-continue
+invalid_unknown_type.min	3	unknown-type
+invalid_undefined_label.min	3	undefined-label
+invalid_duplicate_label.min	3	duplicate-label
+invalid_const_assign.min	3	const-assignment
+invalid_void_return.min	3	type-mismatch
+invalid_not_callable.min	3	not-callable
+invalid_array_size.min	3	constant-required
+invalid_redeclare_global.min	3	redeclaration
+invalid_swap_types.min	3	type-mismatch
+invalid_assign_type.min	3	type-mismatch
+invalid_type_form.min	3	invalid-type
+invalid_type_as_value.min	3	type-name
+invalid_initializer.min	3	invalid-initializer

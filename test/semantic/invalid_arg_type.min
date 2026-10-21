@@ -1,0 +1,8 @@
+int takes_int(int value) {
+    return value;
+}
+
+int main() {
+    int result = takes_int(3);
+    return result;
+}

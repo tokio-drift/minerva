@@ -1,0 +1,12 @@
+int main() {
+    int value = 7;
+    {
+        int value = 11;
+        {
+            int value = 13;
+            value = value + 1;
+        }
+        value = value + 1;
+    }
+    return value;
+}
