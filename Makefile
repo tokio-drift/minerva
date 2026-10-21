@@ -1,18 +1,20 @@
+SRC_DIR   := src
+BUILD_DIR := build
 CXX      := g++
-CXXFLAGS := -Wall -Wno-unused-function -std=c++17
+CXXFLAGS := -Wall -Wno-unused-function -std=c++17 -I$(SRC_DIR) -I$(BUILD_DIR)
 FLEX     := flex
 BISON    := bison
 
-SRC_DIR   := src
-BUILD_DIR := build
 LEX_FILE  := $(SRC_DIR)/lexer.l
 PARSER_FILE := $(SRC_DIR)/parser.y
 LEX_GEN   := $(BUILD_DIR)/lex.yy.cpp
 PARSER_GEN := $(BUILD_DIR)/parser.tab.cpp
 PARSER_HDR := $(BUILD_DIR)/parser.tab.h
 TARGET    := minerva
+AST_SRC   := $(SRC_DIR)/ast.cpp
+AST_HDR   := $(SRC_DIR)/ast.h
 
-.PHONY: all clean run conflicts summ_conflicts
+.PHONY: all clean run conflicts summ_conflicts asan test-ast
 
 all: $(TARGET)
 
@@ -30,11 +32,19 @@ $(PARSER_HDR): $(PARSER_GEN)
 $(LEX_GEN): $(LEX_FILE) $(PARSER_HDR)
 	$(FLEX) -o $(LEX_GEN) $(LEX_FILE)
 
-$(TARGET): $(LEX_GEN) $(PARSER_GEN)
-	$(CXX) $(CXXFLAGS) $(LEX_GEN) $(PARSER_GEN) -o $(TARGET) -lfl
+$(TARGET): $(LEX_GEN) $(PARSER_GEN) $(AST_SRC) $(AST_HDR)
+	$(CXX) $(CXXFLAGS) $(LEX_GEN) $(PARSER_GEN) $(AST_SRC) -o $(TARGET) -lfl
+
+# Sanitizer build (AddressSanitizer + UBSan); output: ./minerva_asan
+asan: $(LEX_GEN) $(PARSER_GEN) $(AST_SRC) $(AST_HDR)
+	$(CXX) $(CXXFLAGS) -g -fsanitize=address,undefined -fno-omit-frame-pointer $(LEX_GEN) $(PARSER_GEN) $(AST_SRC) -o minerva_asan
+
+# Golden AST tests (Phase 1)
+test-ast: $(TARGET)
+	./test/ast_tests.sh ./$(TARGET)
 
 clean:
-	rm -rf $(BUILD_DIR) $(TARGET)
+	rm -rf $(BUILD_DIR) $(TARGET) minerva_asan
 
 run: $(TARGET)
 	./$(TARGET) $(FILE)

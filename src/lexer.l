@@ -6,8 +6,19 @@
 using namespace std;
 
 extern YYLTYPE yylloc;
+
+/* Column tracking: g_col is the 1-based column of the next character to be read. */
+static int g_col = 1;
+void resetLexerState() { g_col = 1; yylineno = 1; }
+
 #define YY_USER_ACTION \
-    yylloc.first_line = yylloc.last_line = yylineno;
+    yylloc.first_line = yylloc.last_line = yylineno; \
+    yylloc.first_column = g_col; \
+    for (int i_ = 0; i_ < yyleng; i_++) { if (yytext[i_] == '\n') g_col = 1; else g_col++; } \
+    yylloc.last_column = g_col - 1;
+
+/* Token with a semantic value: the lexeme is interned (pool owned by ast.cpp). */
+#define RET_VAL(name, tok) { addTok(name); yylval.sval = internStr(yytext); return tok; }
 
 extern void addTok(const string &tokName);
 extern void addErr(const string &msg);
@@ -43,25 +54,25 @@ ID {LETTER}({LETTER}|{DIGIT})*
     yyterminate();
 }
 
-^[ \t]*"#"[ \t]*[a-zA-Z_]+[^\n]* {addTok("PREPROCESSOR"); return PREPROCESSOR;}
+^[ \t]*"#"[ \t]*[a-zA-Z_]+[^\n]* RET_VAL("PREPROCESSOR", PREPROCESSOR)
 
-\"([^"\n\\]|\\.)*\" {addTok("STRING_LITERAL"); return STRING_LITERAL;}
+\"([^"\n\\]|\\.)*\" RET_VAL("STRING_LITERAL", STRING_LITERAL)
 \"([^"\n\\]|\\.)* {addErr("Unterminated string literal: "+string(yytext));}
 
-'(\\.|[^'\\\n])' {addTok("CHAR_LITERAL"); return CHAR_LITERAL;}
+'(\\.|[^'\\\n])' RET_VAL("CHAR_LITERAL", CHAR_LITERAL)
 '' {addErr("Empty char literal: ''");}
 '(\\.|[^'\\\n]){2,}' {addErr("Invalid char literal (too many characters): "+string(yytext));}
 '(\\.|[^'\\\n])* {addErr("Unterminated char literal: "+string(yytext));}
 
-0[xX][0-9a-fA-F]+ {addTok("INT_LITERAL"); return INT_LITERAL;}
-0[bB][01]+ {addTok("INT_LITERAL"); return INT_LITERAL;}
+0[xX][0-9a-fA-F]+ RET_VAL("INT_LITERAL", INT_LITERAL)
+0[bB][01]+ RET_VAL("INT_LITERAL", INT_LITERAL)
 
-{DIGIT}+"."{DIGIT}+([eE][+-]?{DIGIT}+)? {addTok("FLOAT_LITERAL"); return FLOAT_LITERAL;}
-{DIGIT}+[eE][+-]?{DIGIT}+ {addTok("FLOAT_LITERAL"); return FLOAT_LITERAL;}
+{DIGIT}+"."{DIGIT}+([eE][+-]?{DIGIT}+)? RET_VAL("FLOAT_LITERAL", FLOAT_LITERAL)
+{DIGIT}+[eE][+-]?{DIGIT}+ RET_VAL("FLOAT_LITERAL", FLOAT_LITERAL)
 {DIGIT}+{LETTER}({LETTER}|{DIGIT})* {addErr("Invalid number/identifier (digit-led): "+string(yytext));}
-{DIGIT}+ {addTok("INT_LITERAL"); return INT_LITERAL;}
+{DIGIT}+ RET_VAL("INT_LITERAL", INT_LITERAL)
 
-"nullptr" {addTok("NULL_LITERAL"); return NULL_LITERAL;}
+"nullptr" RET_VAL("NULL_LITERAL", NULL_LITERAL)
 
 "if" {addTok("KEYWORD"); return IF;}
 "else" {addTok("KEYWORD"); return ELSE;}
@@ -100,7 +111,7 @@ ID {LETTER}({LETTER}|{DIGIT})*
 "snapshot" {addTok("KEYWORD"); return SNAPSHOT;}
 "rewind" {addTok("KEYWORD"); return REWIND;}
 
-{ID} {addTok("IDENTIFIER"); return IDENTIFIER;}
+{ID} RET_VAL("IDENTIFIER", IDENTIFIER)
 
 "<<=" {addTok("ASSIGNMENT_OPERATOR"); return SHL_ASSIGN;}
 ">>=" {addTok("ASSIGNMENT_OPERATOR"); return SHR_ASSIGN;}

@@ -1,0 +1,17 @@
+int main() {
+    int a = 1;
+    int b = 2;
+    int c = 3;
+    int r1 = a + b * c;
+    int r2 = (a + b) * c;
+    int r3 = a - b - c;
+    int r4;
+    r4 = a = b;
+    int r5 = a < b == b > c;
+    int r6 = a || b && c;
+    int r7 = -a * ~b;
+    int r8 = a ? b : c ? a : b;
+    int r9 = a << 1 + 2;
+    r4 += a & b | c ^ a;
+    return r1;
+}

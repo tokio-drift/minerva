@@ -1,0 +1,103 @@
+Program
+  FuncDef main : int
+    Block
+      DeclStmt
+        VarDecl a : int
+          Init
+            IntLit 1
+      DeclStmt
+        VarDecl b : int
+          Init
+            IntLit 2
+      DeclStmt
+        VarDecl c : int
+          Init
+            IntLit 3
+      DeclStmt
+        VarDecl r1 : int
+          Init
+            Binary +
+              Ident a
+              Binary *
+                Ident b
+                Ident c
+      DeclStmt
+        VarDecl r2 : int
+          Init
+            Binary *
+              Binary +
+                Ident a
+                Ident b
+              Ident c
+      DeclStmt
+        VarDecl r3 : int
+          Init
+            Binary -
+              Binary -
+                Ident a
+                Ident b
+              Ident c
+      DeclStmt
+        VarDecl r4 : int
+      ExprStmt
+        Assign =
+          Ident r4
+          Assign =
+            Ident a
+            Ident b
+      DeclStmt
+        VarDecl r5 : int
+          Init
+            Binary ==
+              Binary <
+                Ident a
+                Ident b
+              Binary >
+                Ident b
+                Ident c
+      DeclStmt
+        VarDecl r6 : int
+          Init
+            Binary ||
+              Ident a
+              Binary &&
+                Ident b
+                Ident c
+      DeclStmt
+        VarDecl r7 : int
+          Init
+            Binary *
+              Unary -
+                Ident a
+              Unary ~
+                Ident b
+      DeclStmt
+        VarDecl r8 : int
+          Init
+            Conditional
+              Ident a
+              Ident b
+              Conditional
+                Ident c
+                Ident a
+                Ident b
+      DeclStmt
+        VarDecl r9 : int
+          Init
+            Binary <<
+              Ident a
+              Binary +
+                IntLit 1
+                IntLit 2
+      ExprStmt
+        Assign +=
+          Ident r4
+          Binary |
+            Binary &
+              Ident a
+              Ident b
+            Binary ^
+              Ident c
+              Ident a
+      Return
+        Ident r1

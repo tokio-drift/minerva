@@ -1,0 +1,61 @@
+Program
+  Directive #include <stdio.h>
+  FuncDef add : int
+    Param x : int
+    Param y : int
+    Block
+      Return
+        Binary +
+          Ident x
+          Ident y
+  FuncDef nothing : void
+    Block
+      Return
+  FuncDef main : int
+    Block
+      DeclStmt
+        VarDecl total : int
+          Init
+            IntLit 0
+      Block
+        DeclStmt
+          VarDecl inner : int
+            Init
+              IntLit 5
+        Block
+          ExprStmt
+            Assign =
+              Ident total
+              Ident inner
+      DeclStmt
+        VarDecl arr : int
+          Dim
+            IntLit 3
+          Init
+            InitList
+              IntLit 1
+              IntLit 2
+              IntLit 3
+      DeclStmt
+        VarDecl msg : char*
+          Init
+            StringLit "hi"
+      DeclStmt
+        VarDecl f : float
+          Init
+            FloatLit 1.5
+      ExprStmt
+        Assign =
+          Ident total
+          Call
+            Ident add
+            Ident total
+            Index
+              Ident arr
+              IntLit 1
+      ExprStmt
+        Postfix ++
+          Ident total
+      EmptyStmt
+      Return
+        Ident total
