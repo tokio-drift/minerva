@@ -5,24 +5,8 @@
 #include <vector>
 
 #include "ast.h"
+#include "diagnostic.h"
 #include "types.h"
-
-struct Diagnostic {
-    SrcLoc loc;
-    std::string category;
-    std::string message;
-};
-
-enum class ExprCategory {
-    RValue,
-    LValue,
-    Void
-};
-
-struct ExprInfo {
-    TypeRef type;
-    ExprCategory category = ExprCategory::RValue;
-};
 
 class Analyzer {
 public:
@@ -30,6 +14,11 @@ public:
 
     bool failed() const { return !diagnostics_.empty(); }
     const std::vector<Diagnostic> &diagnostics() const { return diagnostics_; }
+
+    // Results of the analysis, consumed by the IR generator.
+    TypeRef typeOfDecl(const VarDecl *decl) const;
+    TypeRef typeOfFunction(const FuncDef *fn) const;
+    bool expressionInfo(const Node *node, ExprInfo *out) const;
 
 private:
     struct Symbol {
@@ -52,6 +41,7 @@ private:
     void checkCondition(Node *cond, const SrcLoc &loc);
 
     ExprInfo checkExpression(Node *node);
+    ExprInfo computeExpression(Node *node);
     ExprInfo checkIdent(const Ident &node);
     ExprInfo checkUnary(const Unary &node);
     ExprInfo checkPostfix(const Postfix &node);
@@ -76,6 +66,8 @@ private:
     std::unordered_map<std::string, SrcLoc> labels_;
     std::vector<std::pair<std::string, SrcLoc>> pendingGotos_;
     std::unordered_map<const FuncDef *, TypeRef> functionTypes_;
+    std::unordered_map<const VarDecl *, TypeRef> declTypes_;
+    std::unordered_map<const Node *, ExprInfo> exprTypes_;
     TypeRef currentReturn_;
     int loopDepth_ = 0;
     int switchDepth_ = 0;

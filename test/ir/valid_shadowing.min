@@ -1,0 +1,15 @@
+int x = 5;
+
+int f(int x) {
+    return x + 1;
+}
+
+int main() {
+    int x = 10;
+    {
+        int x = 20;
+        x = x + 1;
+    }
+    int y = f(x);
+    return x + y;
+}

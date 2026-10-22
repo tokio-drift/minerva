@@ -1,0 +1,21 @@
+# Phase 3 IR generation cases.
+# source file <TAB> expected exit status <TAB> expected diagnostic categories <TAB> golden file
+# Exit status 0 means the IR must be published and must match the golden file,
+# 3 means the source must be rejected by the semantic stage,
+# 4 means the source must be rejected by the IR stage.
+valid_assign.min	0	-	valid_assign.ir
+valid_increment.min	0	-	valid_increment.ir
+valid_operators.min	0	-	valid_operators.ir
+valid_nested_arith.min	0	-	valid_nested_arith.ir
+valid_precedence.min	0	-	valid_precedence.ir
+valid_calls.min	0	-	valid_calls.ir
+valid_globals.min	0	-	valid_globals.ir
+valid_shadowing.min	0	-	valid_shadowing.ir
+valid_types.min	0	-	valid_types.ir
+valid_void.min	0	-	valid_void.ir
+valid_compare.min	0	-	valid_compare.ir
+valid_recursion.min	0	-	valid_recursion.ir
+invalid_control_flow.min	4	unsupported-construct	-
+invalid_pointer.min	4	unsupported-construct	-
+invalid_string.min	4	unsupported-construct	-
+invalid_semantic.min	3	undeclared	-

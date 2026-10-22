@@ -1,0 +1,9 @@
+int counter = 0;
+int limit;
+static int reserved = 7;
+
+int main() {
+    limit = 10;
+    counter = counter + 1;
+    return counter + reserved;
+}

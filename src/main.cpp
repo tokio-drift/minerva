@@ -1,12 +1,20 @@
 // main.cpp - command line driver
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <string>
+#include <vector>
+
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "ast.h"
 #include "frontend.h"
+#include "ir.h"
+#include "ir_generator.h"
 #include "parser.tab.h"
 #include "semantic.h"
 
@@ -25,7 +33,8 @@ static const char *GREEN = "\033[1;32m";
 static const char *ENDCLR = "\033[0m";
 
 static void usage(const char *prog) {
-    std::cerr << "Usage: " << prog << " [--dump-ast] [--semantic] <source-file>\n";
+    std::cerr << "Usage: " << prog << " [--dump-ast] [--semantic] <source-file> [-o <output.ir>]\n";
+    std::cerr << "       " << prog << " --verify-ir <file.ir>\n";
 }
 
 static void printTokenTable() {
@@ -52,45 +61,183 @@ static void printErrorReport(const std::string &path) {
     std::cerr << "Status: " << RED << "INVALID\n" << ENDCLR;
 }
 
-static int runSemantic(const std::string &path) {
-    Analyzer analyzer;
-    analyzer.analyze(*g_program);
-    const auto &diags = analyzer.diagnostics();
+static void printDiagnostics(const std::string &path, const std::vector<Diagnostic> &diags) {
     for (const auto &d : diags) {
         std::cerr << path << ":" << d.loc.line << ":" << d.loc.col << ": error[" << d.category
                   << "]: " << d.message << "\n";
     }
+    std::cerr << diags.size() << " error(s)\n";
+}
+
+static int runSemantic(const std::string &path) {
+    Analyzer analyzer;
+    analyzer.analyze(*g_program);
+    const auto &diags = analyzer.diagnostics();
     if (!diags.empty()) {
-        std::cerr << diags.size() << " error(s)\n";
+        printDiagnostics(path, diags);
         return 3;
     }
     std::cout << "semantic analysis: no errors\n";
     return 0;
 }
 
+// Writes the content to a temporary file in the target directory and renames it
+// over the target, so that a failure never leaves a partial file behind.
+static bool publishOutput(const std::string &path, const std::string &content) {
+    size_t slash = path.find_last_of('/');
+    std::string dir = slash == std::string::npos ? std::string(".") : path.substr(0, slash);
+    if (dir.empty()) dir = "/";
+    std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
+    if (base.empty()) {
+        std::cerr << "Error: '" << path << "' is not a valid output path\n";
+        return false;
+    }
+
+    std::string tmpl = dir + "/." + base + ".tmpXXXXXX";
+    std::vector<char> buffer(tmpl.begin(), tmpl.end());
+    buffer.push_back('\0');
+    int fd = mkstemp(buffer.data());
+    if (fd < 0) {
+        std::cerr << "Error: cannot create a temporary file in '" << dir << "'\n";
+        return false;
+    }
+    std::string tempPath(buffer.data());
+
+    FILE *f = fdopen(fd, "w");
+    if (!f) {
+        close(fd);
+        unlink(tempPath.c_str());
+        std::cerr << "Error: cannot open the temporary file '" << tempPath << "'\n";
+        return false;
+    }
+    bool ok = fwrite(content.data(), 1, content.size(), f) == content.size();
+    if (fclose(f) != 0) ok = false;
+    if (!ok) {
+        unlink(tempPath.c_str());
+        std::cerr << "Error: cannot write '" << path << "'\n";
+        return false;
+    }
+
+    mode_t mask = umask(0);
+    umask(mask);
+    chmod(tempPath.c_str(), 0666 & ~mask);
+
+    if (rename(tempPath.c_str(), path.c_str()) != 0) {
+        unlink(tempPath.c_str());
+        std::cerr << "Error: cannot replace '" << path << "'\n";
+        return false;
+    }
+    return true;
+}
+
+static int runIRPipeline(const std::string &sourcePath, const std::string &outputPath) {
+    Analyzer analyzer;
+    analyzer.analyze(*g_program);
+    if (!analyzer.diagnostics().empty()) {
+        printDiagnostics(sourcePath, analyzer.diagnostics());
+        return 3;
+    }
+
+    IRModule module;
+    IRGenerator generator;
+    if (!generator.generate(*g_program, analyzer, &module)) {
+        printDiagnostics(sourcePath, generator.diagnostics());
+        return 4;
+    }
+
+    // The published file is the text that was read back and verified.
+    std::string text = serializeIR(module);
+    IRModule reparsed;
+    std::vector<std::string> errors;
+    if (!parseIR(text, &reparsed, &errors)) {
+        std::cerr << sourcePath << ": error[ir-error]: the generated IR cannot be read back\n";
+        for (const auto &e : errors) std::cerr << "  " << e << "\n";
+        return 4;
+    }
+    if (!verifyIR(reparsed, &errors)) {
+        std::cerr << sourcePath << ": error[ir-error]: the generated IR is not valid\n";
+        for (const auto &e : errors) std::cerr << "  " << e << "\n";
+        return 4;
+    }
+
+    if (!publishOutput(outputPath, serializeIR(reparsed))) return 1;
+    std::cout << "wrote " << outputPath << "\n";
+    return 0;
+}
+
+static int verifyIRFile(const std::string &path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::cerr << "Error: cannot open file '" << path << "'\n";
+        return 1;
+    }
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    IRModule module;
+    std::vector<std::string> errors;
+    if (!parseIR(text, &module, &errors)) {
+        for (const auto &e : errors) std::cerr << path << ": error[ir-error]: " << e << "\n";
+        return 4;
+    }
+    if (!verifyIR(module, &errors)) {
+        for (const auto &e : errors) std::cerr << path << ": error[ir-error]: " << e << "\n";
+        return 4;
+    }
+    std::cout << "verified " << path << "\n";
+    return 0;
+}
+
 int main(int argc, char **argv) {
     bool dumpTree = false;
     bool semanticOnly = false;
-    const char *path = nullptr;
+    std::string sourcePath;
+    std::string outputPath;
+    std::string verifyPath;
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--dump-ast") == 0) {
+        std::string arg = argv[i];
+        if (arg == "--dump-ast") {
             dumpTree = true;
-        } else if (strcmp(argv[i], "--semantic") == 0) {
+        } else if (arg == "--semantic") {
             semanticOnly = true;
-        } else if (!path) {
-            path = argv[i];
+        } else if (arg == "-o") {
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                return 1;
+            }
+            outputPath = argv[++i];
+        } else if (arg.size() > 2 && arg.compare(0, 2, "-o") == 0) {
+            outputPath = arg.substr(2);
+        } else if (arg == "--verify-ir") {
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                return 1;
+            }
+            verifyPath = argv[++i];
+        } else if (!arg.empty() && arg[0] == '-') {
+            usage(argv[0]);
+            return 1;
+        } else if (sourcePath.empty()) {
+            sourcePath = arg;
         } else {
             usage(argv[0]);
             return 1;
         }
     }
-    if (!path) {
+
+    if (!verifyPath.empty()) {
+        if (!sourcePath.empty() || !outputPath.empty()) {
+            usage(argv[0]);
+            return 1;
+        }
+        return verifyIRFile(verifyPath);
+    }
+
+    if (sourcePath.empty()) {
         usage(argv[0]);
         return 1;
     }
-    FILE *f = fopen(path, "r");
+    FILE *f = fopen(sourcePath.c_str(), "r");
     if (!f) {
-        std::cerr << "Error: cannot open file '" << path << "'\n";
+        std::cerr << "Error: cannot open file '" << sourcePath << "'\n";
         return 1;
     }
 
@@ -112,16 +259,17 @@ int main(int argc, char **argv) {
     if (!g_errors.empty()) {
         g_program.reset();
         resetInterned();
-        printErrorReport(path);
+        printErrorReport(sourcePath);
         return 2;
     }
 
     int status = 0;
-    if (semanticOnly) {
-        status = runSemantic(path);
-    } else if (dumpTree) {
-        dumpAst(*g_program, std::cout);
-    } else {
+    if (dumpTree) dumpAst(*g_program, std::cout);
+    if (!outputPath.empty()) {
+        status = runIRPipeline(sourcePath, outputPath);
+    } else if (semanticOnly) {
+        status = runSemantic(sourcePath);
+    } else if (!dumpTree) {
         printTokenTable();
     }
     size_t unsup = countUnsupported(*g_program);

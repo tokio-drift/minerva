@@ -15,6 +15,7 @@ invalid_duplicate_var.min	3	redeclaration
 invalid_duplicate_func.min	3	redefinition
 invalid_call_arity.min	3	call-arity
 invalid_arg_type.min	3	type-mismatch
+invalid_prefix_increment.min	3	invalid-operand
 invalid_return_type.min	3	type-mismatch
 invalid_operand_types.min	3	invalid-operand
 invalid_break.min	3	invalid-break

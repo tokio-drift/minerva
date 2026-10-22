@@ -1,0 +1,5 @@
+func main() -> int {
+L0:
+  %t0 = const int 1
+  br %t0, L0, L9
+}

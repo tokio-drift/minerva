@@ -1,0 +1,4 @@
+func main() -> int {
+  %t0 = copy %t9
+  ret %t0
+}

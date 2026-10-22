@@ -50,6 +50,18 @@ TypeRef makeArray(TypeRef elem, std::vector<long long> dims);
 TypeRef makeFunction(TypeRef ret, std::vector<TypeRef> params);
 TypeRef makeAggregate(const std::string &name);
 
+// Value category of an expression, needed before IR generation.
+enum class ExprCategory {
+    RValue,
+    LValue,
+    Void
+};
+
+struct ExprInfo {
+    TypeRef type;
+    ExprCategory category = ExprCategory::RValue;
+};
+
 TypeRef promote(TypeRef t);
 TypeRef usualArithmetic(TypeRef a, TypeRef b);
 

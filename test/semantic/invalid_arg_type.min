@@ -3,6 +3,8 @@ int takes_int(int value) {
 }
 
 int main() {
-    int result = takes_int(3);
+    int number = 5;
+    int *pointer = &number;
+    int result = takes_int(pointer);
     return result;
 }

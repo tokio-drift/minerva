@@ -11,10 +11,12 @@ LEX_GEN   := $(BUILD_DIR)/lex.yy.cpp
 PARSER_GEN := $(BUILD_DIR)/parser.tab.cpp
 PARSER_HDR := $(BUILD_DIR)/parser.tab.h
 TARGET    := minerva
-CORE_SRC  := $(SRC_DIR)/ast.cpp $(SRC_DIR)/types.cpp $(SRC_DIR)/semantic.cpp $(SRC_DIR)/main.cpp
-CORE_HDR  := $(SRC_DIR)/ast.h $(SRC_DIR)/types.h $(SRC_DIR)/semantic.h $(SRC_DIR)/frontend.h
+CORE_SRC  := $(SRC_DIR)/ast.cpp $(SRC_DIR)/types.cpp $(SRC_DIR)/semantic.cpp \
+             $(SRC_DIR)/ir.cpp $(SRC_DIR)/ir_generator.cpp $(SRC_DIR)/main.cpp
+CORE_HDR  := $(SRC_DIR)/ast.h $(SRC_DIR)/types.h $(SRC_DIR)/semantic.h $(SRC_DIR)/frontend.h \
+             $(SRC_DIR)/diagnostic.h $(SRC_DIR)/ir.h $(SRC_DIR)/ir_generator.h
 
-.PHONY: all clean run conflicts summ_conflicts asan test test-ast test-semantic
+.PHONY: all clean run conflicts summ_conflicts asan test test-ast test-semantic test-ir
 
 all: $(TARGET)
 
@@ -47,7 +49,11 @@ test-ast: $(TARGET)
 test-semantic: $(TARGET)
 	bash test/semantic_tests.sh ./$(TARGET)
 
-test: test-ast test-semantic
+# IR generation, publication and verifier tests (Phase 3)
+test-ir: $(TARGET)
+	bash test/ir_tests.sh ./$(TARGET)
+
+test: test-ast test-semantic test-ir
 
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET) minerva_asan

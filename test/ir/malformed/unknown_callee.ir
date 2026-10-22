@@ -1,0 +1,4 @@
+func main() -> int {
+  %t0 = call int missing(%t1)
+  ret %t0
+}

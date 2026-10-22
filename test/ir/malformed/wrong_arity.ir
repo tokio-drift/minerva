@@ -1,0 +1,10 @@
+func add(add.a int, add.b int) -> int {
+  %t0 = add int add.a, add.b
+  ret %t0
+}
+
+func main() -> int {
+  %t0 = const int 1
+  %t1 = call int add(%t0)
+  ret %t1
+}

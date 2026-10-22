@@ -1,0 +1,5 @@
+func main() -> int {
+  %t0 = const int 1
+  x = copy %t0
+  ret %t0
+}

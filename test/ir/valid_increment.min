@@ -1,0 +1,10 @@
+int main() {
+    int counter = 0;
+    counter++;
+    ++counter;
+    counter--;
+    --counter;
+    int value = counter++;
+    int other = ++counter;
+    return value + other;
+}

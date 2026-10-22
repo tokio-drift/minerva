@@ -69,6 +69,23 @@ void Analyzer::error(const SrcLoc &loc, const std::string &category, const std::
     diagnostics_.push_back({loc, category, message});
 }
 
+TypeRef Analyzer::typeOfDecl(const VarDecl *decl) const {
+    auto it = declTypes_.find(decl);
+    return it == declTypes_.end() ? nullptr : it->second;
+}
+
+TypeRef Analyzer::typeOfFunction(const FuncDef *fn) const {
+    auto it = functionTypes_.find(fn);
+    return it == functionTypes_.end() ? nullptr : it->second;
+}
+
+bool Analyzer::expressionInfo(const Node *node, ExprInfo *out) const {
+    auto it = exprTypes_.find(node);
+    if (it == exprTypes_.end()) return false;
+    *out = it->second;
+    return true;
+}
+
 const Analyzer::Symbol *Analyzer::lookup(const std::string &name) const {
     for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
         auto f = it->find(name);
@@ -124,6 +141,8 @@ void Analyzer::analyze(const Program &program) {
     labels_.clear();
     pendingGotos_.clear();
     functionTypes_.clear();
+    declTypes_.clear();
+    exprTypes_.clear();
     currentReturn_ = nullptr;
     loopDepth_ = 0;
     switchDepth_ = 0;
@@ -233,6 +252,7 @@ void Analyzer::checkFunction(const FuncDef &fn) {
             continue;
         }
         TypeRef type = i < signature->params.size() ? signature->params[i] : typeOfDecl(v, v.loc);
+        declTypes_[&v] = type;
         declareVariable(v.name, type, v.loc);
     }
     labels_.clear();
@@ -343,6 +363,7 @@ void Analyzer::checkDeclaration(const VarDecl &decl) {
         type = sized;
     }
     declareVariable(decl.name, type, decl.loc);
+    declTypes_[&decl] = type;
     checkInitializer(decl, type);
 }
 
@@ -594,6 +615,12 @@ void Analyzer::checkUnsupported(const Unsupported &u) {
 }
 
 ExprInfo Analyzer::checkExpression(Node *node) {
+    ExprInfo info = computeExpression(node);
+    if (node) exprTypes_[node] = info;
+    return info;
+}
+
+ExprInfo Analyzer::computeExpression(Node *node) {
     if (!node) return {makeUnknown(), ExprCategory::Void};
     switch (node->kind) {
     case NodeKind::IntLit:
@@ -674,6 +701,23 @@ ExprInfo Analyzer::checkUnary(const Unary &u) {
     }
     ExprInfo value = decay(operand);
     if (unknownType(value.type)) return {makeUnknown(), ExprCategory::RValue};
+    if (u.op == "++" || u.op == "--") {
+        if (operand.category != ExprCategory::LValue) {
+            error(u.loc, "invalid-operand", "operand of '" + u.op + "' must be an lvalue");
+            return {makeUnknown(), ExprCategory::RValue};
+        }
+        if (!operand.type->isNumeric()) {
+            error(u.loc, "invalid-operand",
+                  "operand of '" + u.op + "' must have arithmetic type ('" + operand.type->str() +
+                      "')");
+            return {makeUnknown(), ExprCategory::RValue};
+        }
+        if (operand.type->isConst) {
+            error(u.loc, "const-assignment", "cannot modify the const-qualified value");
+            return {makeUnknown(), ExprCategory::RValue};
+        }
+        return {operand.type, ExprCategory::RValue};
+    }
     if (u.op == "+" || u.op == "-") {
         if (!value.type->isNumeric()) {
             error(u.loc, "invalid-operand",

@@ -1,0 +1,9 @@
+int main() {
+    int a = 3;
+    int b = 5;
+    int less = a < b;
+    int equal = a == b;
+    int different = a != b;
+    int greater = a >= b;
+    return less + equal + different + greater;
+}

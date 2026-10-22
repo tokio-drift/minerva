@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs every test suite: the source files under test/, the golden AST tests and
-# the semantic analysis tests. Exits nonzero if any suite fails.
+# Runs every test suite: the source files under test/, the golden AST tests, the
+# semantic analysis tests and the IR generation tests. Exits nonzero if any
+# suite fails.
 set -u
 EXE="${1:-./minerva}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -54,6 +55,7 @@ frontend_suite() {
 run_suite "FRONTEND TESTS" frontend_suite
 run_suite "AST TESTS" bash "$HERE/test/ast_tests.sh" "$EXE"
 run_suite "SEMANTIC TESTS" bash "$HERE/test/semantic_tests.sh" "$EXE"
+run_suite "IR TESTS" bash "$HERE/test/ir_tests.sh" "$EXE"
 
 echo -e "${CYAN}TEST RESULTS${ENDCLR}"
 echo -e "${GREEN}Suites passed${ENDCLR}: $pass"
