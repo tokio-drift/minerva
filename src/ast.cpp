@@ -19,7 +19,7 @@ static std::unordered_set<std::string> g_pool;
 const char *internStr(const char *s) { return g_pool.insert(s).first->c_str(); }
 void resetInterned() { g_pool.clear(); }
 
-static void forEachChild(const Node &n, const std::function<void(const Node *)> &f) {
+void forEachChild(const Node &n, const std::function<void(const Node *)> &f) {
     auto list = [&](const NodeList &l) { for (auto &p : l) f(p.get()); };
     switch (n.kind) {
     case NodeKind::Program:     list(static_cast<const Program &>(n).items); break;
@@ -67,7 +67,29 @@ static void forEachChild(const Node &n, const std::function<void(const Node *)> 
 }
 
 size_t countUnsupported(const Node &root) {
-    size_t c = root.kind == NodeKind::Unsupported ? 1 : 0;
+    size_t c = 0;
+    if (root.kind == NodeKind::Unsupported) {
+        const Unsupported &u = static_cast<const Unsupported &>(root);
+        switch (u.kind) {
+        case UnsupKind::If: case UnsupKind::IfElse: case UnsupKind::While:
+        case UnsupKind::DoWhile: case UnsupKind::DoUntil: case UnsupKind::For:
+        case UnsupKind::Switch: case UnsupKind::Struct: case UnsupKind::Union:
+        case UnsupKind::Enum: case UnsupKind::Class: case UnsupKind::Typedef:
+        case UnsupKind::TypedefAggregate: case UnsupKind::Printf: case UnsupKind::Scanf:
+        case UnsupKind::Snapshot: case UnsupKind::Rewind: case UnsupKind::New:
+        case UnsupKind::Delete: case UnsupKind::Cast: case UnsupKind::Sizeof:
+        case UnsupKind::Pipe: case UnsupKind::Swap: case UnsupKind::Member:
+        case UnsupKind::Case: case UnsupKind::Default:
+            break;
+        case UnsupKind::Lambda:
+            if (u.what != "lambda") c++;
+            break;
+        case UnsupKind::Other:
+            if (u.what.rfind("access ", 0) != 0 && u.what.rfind("enumerator ", 0) != 0) c++;
+            break;
+        default: c++; break;
+        }
+    }
     forEachChild(root, [&](const Node *k) { if (k) c += countUnsupported(*k); });
     return c;
 }

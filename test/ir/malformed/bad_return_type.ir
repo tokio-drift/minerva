@@ -1,4 +1,0 @@
-func main() -> int {
-  %t0 = const float 1.5
-  ret %t0
-}

@@ -41,13 +41,18 @@ std::string readVariableName(const std::string &s, size_t *pos) {
 std::vector<std::string> splitOn(const std::string &s, char sep) {
     std::vector<std::string> parts;
     std::string current;
+    bool inString = false, escaped = false;
     for (char c : s) {
-        if (c == sep) {
-            parts.push_back(current);
-            current.clear();
-        } else {
+        if (inString) {
             current += c;
-        }
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') inString = false;
+        } else if (c == '"') {
+            inString = true; current += c;
+        } else if (c == sep) {
+            parts.push_back(current); current.clear();
+        } else current += c;
     }
     parts.push_back(current);
     return parts;
@@ -74,6 +79,8 @@ bool parseType(const std::string &s, size_t *pos, TypeRef *out) {
         return false;
     }
     TypeRef type = typeFromName(name);
+    size_t afterName = i;
+    while (i < s.size() && isspace(static_cast<unsigned char>(s[i]))) i++;
 
     if (i < s.size() && s[i] == '(') {
         i++;
@@ -99,6 +106,8 @@ bool parseType(const std::string &s, size_t *pos, TypeRef *out) {
             return false;
         }
         type = makeFunction(type, params);
+    } else {
+        i = afterName;
     }
 
     while (i < s.size()) {
@@ -153,6 +162,11 @@ bool parseOperand(const std::string &text, IROperand *out) {
         *out = IROperand::temp(t.substr(1), nullptr);
         return true;
     }
+    if (t[0] == '@') {
+        if (t.size() == 1) return false;
+        *out = IROperand::function(t.substr(1));
+        return true;
+    }
     size_t pos = 0;
     std::string name = readVariableName(t, &pos);
     if (!name.empty() && pos == t.size()) {
@@ -201,7 +215,11 @@ std::string instructionText(const IRInstruction &ins) {
         return ins.dest.str() + " = " + ins.mnemonic + " " + (ins.type ? ins.type->str() : "?") +
                " " + (ins.args.empty() ? "" : ins.args[0].str());
     case IROp::Call: {
-        std::string callee = ins.args.empty() ? "" : ins.args[0].name;
+        std::string callee;
+        if (!ins.args.empty()) {
+            const IROperand &c = ins.args[0];
+            callee = c.kind == IROperand::Kind::Function ? c.name : "*" + c.str();
+        }
         std::string args;
         for (size_t i = 1; i < ins.args.size(); i++) {
             if (i > 1) args += ", ";
@@ -226,6 +244,14 @@ std::string instructionText(const IRInstruction &ins) {
         }
         return "br " + cond + ", " + targets;
     }
+    case IROp::Address:
+        return ins.dest.str() + " = addr " + (ins.type ? ins.type->str() : "?") + " " + ins.args[0].str();
+    case IROp::Load:
+        return ins.dest.str() + " = load " + (ins.type ? ins.type->str() : "?") + " " + ins.args[0].str();
+    case IROp::Store:
+        return "store " + (ins.type ? ins.type->str() : "?") + " " + ins.args[0].str() + ", " + ins.args[1].str();
+    case IROp::ElementAddress:
+        return ins.dest.str() + " = elemaddr " + (ins.type ? ins.type->str() : "?") + " " + ins.args[0].str() + ", " + ins.args[1].str();
     }
     return "";
 }
@@ -266,8 +292,8 @@ IROperand IROperand::function(const std::string &name) {
 std::string IROperand::str() const {
     switch (kind) {
     case Kind::Temp: return "%" + name;
-    case Kind::Variable:
-    case Kind::Function: return name;
+    case Kind::Variable: return name;
+    case Kind::Function: return "@" + name;
     case Kind::Literal: return text;
     case Kind::None: break;
     }
@@ -371,7 +397,7 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
         size_t pos = 0;
         TypeRef type;
         if (!parseType(tail, &pos, &type)) return fail("malformed type in decl");
-        std::string name = trim(tail.substr(sp));
+        std::string name = trim(tail.substr(pos));
         if (name.empty() || name.find(' ') != std::string::npos)
             return fail("malformed name in decl");
         ins->type = type;
@@ -386,7 +412,7 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
         size_t pos = 0;
         TypeRef type;
         if (!parseType(tail, &pos, &type)) return fail("malformed type in const");
-        std::string value = trim(tail.substr(sp));
+        std::string value = trim(tail.substr(pos));
         if (value.empty()) return fail("const without a value");
         if (!hasDest || dest.kind != IROperand::Kind::Temp)
             return fail("const does not write a temporary");
@@ -394,6 +420,34 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
         ins->dest = dest;
         ins->dest.type = type;
         ins->args.push_back(IROperand::literal(value, type));
+        return true;
+    }
+
+    if (mnemonic == "addr" || mnemonic == "load" || mnemonic == "elemaddr" || mnemonic == "store") {
+        size_t sp = tail.find_first_of(" \t");
+        if (sp == std::string::npos) return fail(mnemonic + " needs a type and operand(s)");
+        size_t pos = 0; TypeRef type;
+        if (!parseType(tail, &pos, &type)) return fail("malformed type in " + mnemonic);
+        std::string operands = trim(tail.substr(pos));
+        if (mnemonic == "addr" || mnemonic == "load") {
+            IROperand arg;
+            if (!parseOperand(operands, &arg)) return fail("malformed operand in " + mnemonic);
+            if (!hasDest || dest.kind != IROperand::Kind::Temp) return fail(mnemonic + " must write a temporary");
+            ins->op = mnemonic == "addr" ? IROp::Address : IROp::Load;
+            ins->type = type; ins->dest = dest; ins->dest.type = type; ins->args.push_back(arg);
+            return true;
+        }
+        std::vector<std::string> parts = splitOn(operands, ',');
+        if (parts.size() != 2) return fail(mnemonic + " needs two operands");
+        IROperand a, b;
+        if (!parseOperand(parts[0], &a) || !parseOperand(parts[1], &b)) return fail("malformed operands in " + mnemonic);
+        if (mnemonic == "store") {
+            if (hasDest) return fail("store cannot have a destination");
+            ins->op = IROp::Store; ins->type = type; ins->args = {a, b};
+        } else {
+            if (!hasDest || dest.kind != IROperand::Kind::Temp) return fail("elemaddr must write a temporary");
+            ins->op = IROp::ElementAddress; ins->type = type; ins->dest = dest; ins->dest.type = type; ins->args = {a, b};
+        }
         return true;
     }
 
@@ -441,7 +495,13 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
         if (name.empty()) return fail("call without a callee");
         ins->type = type;
         if (hasDest) ins->dest = dest;
-        ins->args.push_back(IROperand::function(name));
+        if (name[0] == '*') {
+            IROperand indirect;
+            if (!parseOperand(trim(name.substr(1)), &indirect)) return fail("malformed indirect callee");
+            ins->args.push_back(indirect);
+        } else {
+            ins->args.push_back(IROperand::function(name));
+        }
         std::string argText = callee.substr(open + 1, close - open - 1);
         if (!trim(argText).empty()) {
             for (const std::string &raw : splitOn(argText, ',')) {
@@ -473,7 +533,7 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
         ins->type = type;
         ins->dest = dest;
         ins->dest.type = type;
-        std::string operands = trim(tail.substr(sp));
+        std::string operands = trim(tail.substr(pos));
         size_t comma = operands.find(',');
         if (comma == std::string::npos) return fail("malformed operands in " + mnemonic);
         IROperand lhs, rhs;
@@ -498,7 +558,7 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
         ins->dest = dest;
         ins->dest.type = type;
         IROperand operand;
-        if (!parseOperand(trim(tail.substr(sp)), &operand))
+        if (!parseOperand(trim(tail.substr(pos)), &operand))
             return fail("malformed operand in " + mnemonic);
         ins->args.push_back(operand);
         return true;
@@ -566,7 +626,7 @@ bool parseIR(const std::string &text, IRModule *module, std::vector<std::string>
             continue;
         }
 
-        if (t.rfind("global ", 0) == 0) {
+        if (t.rfind("global ", 0) == 0 && t.rfind("global = ", 0) != 0) {
             IRInstruction ins;
             if (!parseGlobal(t.substr(7), &ins, errors, lineNo)) return false;
             module->globals.push_back(ins);
@@ -646,6 +706,9 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
     // The signatures are collected first, a call may target a function defined later.
     std::unordered_map<std::string, size_t> arities;
     for (const IRFunction &fn : module.functions) arities.emplace(fn.name, fn.params.size());
+    const std::unordered_set<std::string> runtimeFunctions = {
+        "printf", "scanf", "malloc", "free", "__minerva_snapshot", "__minerva_rewind"
+    };
 
     for (const IRFunction &fn : module.functions) {
         if (fn.name.empty()) fail("function without a name");
@@ -687,6 +750,19 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
                 if (global != globals.end()) {
                     defined = true;
                     if (type) *type = global->second;
+                }
+                return;
+            }
+            if (o.kind == IROperand::Kind::Function) {
+                auto target = std::find_if(module.functions.begin(), module.functions.end(),
+                    [&](const IRFunction &candidate) { return candidate.name == o.name; });
+                if (target != module.functions.end()) {
+                    defined = true;
+                    if (type) {
+                        std::vector<TypeRef> params;
+                        for (const auto &param : target->params) params.push_back(param.type);
+                        *type = makePointer(makeFunction(target->returnType, params));
+                    }
                 }
                 return;
             }
@@ -830,19 +906,81 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
                     fail("temporary " + ins.dest.name + " is defined twice in '" + fn.name + "'");
                 break;
             }
+            case IROp::Address:
+            case IROp::Load: {
+                if (ins.dest.kind != IROperand::Kind::Temp || ins.args.size() != 1 || !ins.type) {
+                    fail("malformed " + std::string(ins.op == IROp::Address ? "addr" : "load") + " in '" + fn.name + "'"); break;
+                }
+                bool defined = false; TypeRef operandType;
+                operandDefined(ins.args[0], defined, &operandType);
+                if (!defined) fail("memory instruction in '" + fn.name + "' uses undefined operand " + ins.args[0].str());
+                if (ins.op == IROp::Load && (!operandType || !operandType->isPointer()))
+                    fail("load in '" + fn.name + "' requires a pointer operand");
+                if (ins.op == IROp::Address && ins.type->kind != TypeKind::Pointer)
+                    fail("addr in '" + fn.name + "' must produce a pointer type");
+                if (!temps.emplace(ins.dest.name, ins.type).second) fail("temporary " + ins.dest.name + " is defined twice in '" + fn.name + "'");
+                break;
+            }
+            case IROp::ElementAddress: {
+                if (ins.dest.kind != IROperand::Kind::Temp || ins.args.size() != 2 || !ins.type || !ins.type->isPointer()) {
+                    fail("malformed elemaddr in '" + fn.name + "'"); break;
+                }
+                bool baseDefined = false, indexDefined = false; TypeRef baseType, indexType;
+                operandDefined(ins.args[0], baseDefined, &baseType); operandDefined(ins.args[1], indexDefined, &indexType);
+                if (!baseDefined || !indexDefined) fail("elemaddr in '" + fn.name + "' uses an undefined operand");
+                if (!baseType || (!baseType->isArray() && !baseType->isPointer())) fail("elemaddr in '" + fn.name + "' requires an array or pointer base");
+                if (!temps.emplace(ins.dest.name, ins.type).second) fail("temporary " + ins.dest.name + " is defined twice in '" + fn.name + "'");
+                break;
+            }
+            case IROp::Store: {
+                if (ins.args.size() != 2 || !ins.type) { fail("malformed store in '" + fn.name + "'"); break; }
+                bool ptrDefined = false, valueDefined = false; TypeRef ptrType, valueType;
+                operandDefined(ins.args[0], ptrDefined, &ptrType); operandDefined(ins.args[1], valueDefined, &valueType);
+                if (!ptrDefined || !valueDefined) fail("store in '" + fn.name + "' uses an undefined operand");
+                if (!ptrType || !ptrType->isPointer()) fail("store in '" + fn.name + "' requires a pointer destination");
+                if (ptrType && ptrType->sub && !sameType(ptrType->sub, ins.type)) fail("store in '" + fn.name + "' has an inconsistent value type");
+                break;
+            }
             case IROp::Call: {
-                if (ins.args.empty() || ins.args[0].kind != IROperand::Kind::Function) {
+                if (ins.args.empty()) {
                     fail("call in '" + fn.name + "' has no callee");
                     break;
                 }
-                const std::string &callee = ins.args[0].name;
-                auto arity = arities.find(callee);
-                if (arity == arities.end()) {
-                    fail("call in '" + fn.name + "' targets the undefined function " + callee);
-                } else if (arity->second != ins.args.size() - 1) {
-                    fail("call in '" + fn.name + "' passes " + std::to_string(ins.args.size() - 1) +
-                         " argument(s) to '" + callee + "' which takes " +
-                         std::to_string(arity->second));
+                const IROperand &calleeOperand = ins.args[0];
+                if (calleeOperand.kind == IROperand::Kind::Function) {
+                    const std::string &callee = calleeOperand.name;
+                    auto arity = arities.find(callee);
+                    if (arity == arities.end()) {
+                        if (!runtimeFunctions.count(callee)) {
+                            fail("call in '" + fn.name + "' targets the undefined function " + callee);
+                        } else {
+                            const size_t argc = ins.args.size() - 1;
+                            if ((callee == "malloc" || callee == "free" || callee == "__minerva_snapshot") && argc != 1)
+                                fail("runtime call to '" + callee + "' has the wrong number of arguments");
+                            if (callee == "__minerva_rewind" && argc != 2)
+                                fail("runtime call to '__minerva_rewind' has the wrong number of arguments");
+                            if ((callee == "printf" || callee == "scanf") && argc < 1)
+                                fail("runtime I/O call requires a format string");
+                        }
+                    } else if (arity->second != ins.args.size() - 1) {
+                        fail("call in '" + fn.name + "' passes " + std::to_string(ins.args.size() - 1) +
+                             " argument(s) to '" + callee + "' which takes " +
+                             std::to_string(arity->second));
+                    }
+                } else {
+                    bool calleeDefined = false;
+                    TypeRef calleeType;
+                    operandDefined(calleeOperand, calleeDefined, &calleeType);
+                    if (!calleeDefined || !calleeType || !calleeType->isPointer() ||
+                        !calleeType->sub || calleeType->sub->kind != TypeKind::Function) {
+                        fail("indirect call in '" + fn.name + "' requires a defined function pointer");
+                    } else {
+                        const TypeRef signature = calleeType->sub;
+                        if (signature->params.size() != ins.args.size() - 1)
+                            fail("indirect call in '" + fn.name + "' has the wrong number of arguments");
+                        if (signature->ret && ins.type && !sameType(signature->ret, ins.type))
+                            fail("indirect call in '" + fn.name + "' has an inconsistent result type");
+                    }
                 }
                 for (size_t i = 1; i < ins.args.size(); i++) {
                     bool defined = false;

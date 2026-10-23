@@ -1,69 +1,78 @@
-SRC_DIR   := src
-BUILD_DIR := build
-CXX      := g++
-CXXFLAGS := -Wall -Wno-unused-function -std=c++17 -I$(SRC_DIR) -I$(BUILD_DIR)
-FLEX     := flex
-BISON    := bison
+# Build Minerva from the Flex lexer and Bison parser. Output generation is run separately with ./run.sh.
 
-LEX_FILE  := $(SRC_DIR)/lexer.l
-PARSER_FILE := $(SRC_DIR)/parser.y
-LEX_GEN   := $(BUILD_DIR)/lex.yy.cpp
-PARSER_GEN := $(BUILD_DIR)/parser.tab.cpp
-PARSER_HDR := $(BUILD_DIR)/parser.tab.h
-TARGET    := minerva
-CORE_SRC  := $(SRC_DIR)/ast.cpp $(SRC_DIR)/types.cpp $(SRC_DIR)/semantic.cpp \
-             $(SRC_DIR)/ir.cpp $(SRC_DIR)/ir_generator.cpp $(SRC_DIR)/main.cpp
-CORE_HDR  := $(SRC_DIR)/ast.h $(SRC_DIR)/types.h $(SRC_DIR)/semantic.h $(SRC_DIR)/frontend.h \
-             $(SRC_DIR)/diagnostic.h $(SRC_DIR)/ir.h $(SRC_DIR)/ir_generator.h
+CXX       ?= g++
+CXXFLAGS  ?= -Wall -Wno-unused-function -std=c++17 -Isrc -Ibuild
+FLEX      ?= flex
+BISON     ?= bison
 
-.PHONY: all clean run conflicts summ_conflicts asan test test-ast test-semantic test-ir
+TARGET      := minerva
+BUILD_DIR   := build
+BUILD_STAMP := $(BUILD_DIR)/.dir-stamp
+LEX_FILE    := src/lexer.l
+PARSER_FILE := src/parser.y
+LEX_GEN     := $(BUILD_DIR)/lex.yy.cpp
+PARSER_GEN  := $(BUILD_DIR)/parser.tab.cpp
+PARSER_HDR  := $(BUILD_DIR)/parser.tab.h
+IR_DIR      := ir
+AST_DIR     := typed_ast
 
+CORE_SRC := src/ast.cpp src/types.cpp src/semantic.cpp src/ir.cpp \
+            src/ir_generator.cpp src/main.cpp
+CORE_HDR := src/ast.h src/types.h src/semantic.h src/frontend.h \
+            src/diagnostic.h src/ir.h src/ir_generator.h
+
+.PHONY: all build outputs generate generate-ir generate-ast test run clean distclean regen conflicts
+
+# Default: build only the compiler binary. Run ./run.sh separately to generate IR and typed AST.
 all: $(TARGET)
-
 build: $(TARGET)
 
-$(BUILD_DIR):
+$(BUILD_STAMP):
 	mkdir -p $(BUILD_DIR)
+	touch $@
 
-$(PARSER_GEN): $(PARSER_FILE)
-	mkdir -p $(BUILD_DIR)
+# Bison creates both the parser implementation and its header.
+$(PARSER_GEN) $(PARSER_HDR) &: $(PARSER_FILE) | $(BUILD_STAMP)
+	@command -v $(BISON) >/dev/null 2>&1 || { echo "Error: Bison is required. Install it before building." >&2; exit 1; }
 	$(BISON) -d --defines=$(PARSER_HDR) -o $(PARSER_GEN) $(PARSER_FILE)
 
-$(PARSER_HDR): $(PARSER_GEN)
+# Flex needs the parser header, so the parser is generated first.
+$(LEX_GEN): $(LEX_FILE) $(PARSER_HDR) | $(BUILD_STAMP)
+	@command -v $(FLEX) >/dev/null 2>&1 || { echo "Error: Flex is required. Install it before building." >&2; exit 1; }
+	$(FLEX) -o $@ $(LEX_FILE)
 
-$(LEX_GEN): $(LEX_FILE) $(PARSER_HDR)
-	$(FLEX) -o $(LEX_GEN) $(LEX_FILE)
+# Compile generated lexer/parser plus the handwritten C++ sources.
+$(TARGET): $(LEX_GEN) $(PARSER_GEN) $(PARSER_HDR) $(CORE_SRC) $(CORE_HDR)
+	$(CXX) $(CXXFLAGS) $(LEX_GEN) $(PARSER_GEN) $(CORE_SRC) -o $@
 
-$(TARGET): $(LEX_GEN) $(PARSER_GEN) $(CORE_SRC) $(CORE_HDR)
-	$(CXX) $(CXXFLAGS) $(LEX_GEN) $(PARSER_GEN) $(CORE_SRC) -o $(TARGET) -lfl
+# Generate IR and typed AST for all eight test programs.
+outputs generate test: $(TARGET)
+	bash ./run.sh generate
 
-# Sanitizer build (AddressSanitizer + UBSan); output: ./minerva_asan
-asan: $(LEX_GEN) $(PARSER_GEN) $(CORE_SRC) $(CORE_HDR)
-	$(CXX) $(CXXFLAGS) -g -fsanitize=address,undefined -fno-omit-frame-pointer $(LEX_GEN) $(PARSER_GEN) $(CORE_SRC) -o minerva_asan
+generate-ir: $(TARGET)
+	bash ./run.sh ir
 
-# Golden AST tests (Phase 1)
-test-ast: $(TARGET)
-	bash test/ast_tests.sh ./$(TARGET)
+generate-ast: $(TARGET)
+	bash ./run.sh ast
 
-# Semantic analysis tests (Phase 2)
-test-semantic: $(TARGET)
-	bash test/semantic_tests.sh ./$(TARGET)
-
-# IR generation, publication and verifier tests (Phase 3)
-test-ir: $(TARGET)
-	bash test/ir_tests.sh ./$(TARGET)
-
-test: test-ast test-semantic test-ir
-
-clean:
-	rm -rf $(BUILD_DIR) $(TARGET) minerva_asan
-
+# Run one source file, e.g. make run FILE=test/01_arithmetic.min
 run: $(TARGET)
-	./$(TARGET) $(FILE)
+	@test -n "$(FILE)" || { echo 'Usage: make run FILE=test/01_arithmetic.min' >&2; exit 2; }
+	./$(TARGET) "$(FILE)"
 
-conflicts:
-	mkdir -p $(BUILD_DIR)
+# Force a fresh parser, lexer, and compiler build.
+regen:
+	rm -rf $(BUILD_DIR) $(TARGET)
+	$(MAKE) $(TARGET)
+
+# Optional Bison conflict report (written inside build/; not part of normal builds).
+conflicts: | $(BUILD_STAMP)
+	@command -v $(BISON) >/dev/null 2>&1 || { echo "Error: Bison is required." >&2; exit 1; }
 	$(BISON) -d --defines=$(BUILD_DIR)/parser.conflicts.h -o $(BUILD_DIR)/parser.conflicts.cpp $(PARSER_FILE) -Wcounterexamples --report=solved
 
-summ_conflicts: 
-	python3 scripts/summarize_conflicts.py
+# Delete compiler outputs and all build artifacts, including the entire build folder.
+clean:
+	rm -f $(TARGET) minerva_asan
+	rm -rf $(BUILD_DIR) $(IR_DIR) $(AST_DIR) generated
+
+distclean: clean

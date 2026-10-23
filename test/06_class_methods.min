@@ -1,0 +1,16 @@
+class Base {
+protected:
+    int value;
+    int get() { return value; }
+public:
+    int set(int x) { value = x; return value; }
+};
+class Derived : public Base {
+public:
+    int adjust(int x) { value = x + 1; return get(); }
+};
+int main() {
+    Derived d;
+    d.set(4);
+    return d.adjust(5);
+}

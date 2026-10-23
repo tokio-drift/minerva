@@ -1,0 +1,16 @@
+int add_one(int x) {
+    return x + 1;
+}
+
+int apply(int (*fn)(int), int value) {
+    return fn(value);
+}
+
+int main() {
+    int (*fn)(int) = add_one;
+    int (*fn2)(int) = &add_one;
+    fn2 = fn;
+    int a = fn2(41);
+    int b = apply(fn, a);
+    return b;
+}

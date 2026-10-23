@@ -1,0 +1,43 @@
+typedef int Count;
+Count globalCount;
+struct Box { int value; };
+union Number { int i; float f; char c; };
+enum Color { RED, GREEN = 5, BLUE, NEXT = BLUE + 2 };
+int increment(int x) { return x + 1; }
+int first(int values[]) { return values[0]; }
+int main() {
+    Count count = 2;
+    globalCount = count;
+    struct Box box;
+    box.value = 3;
+    union Number number;
+    number.i = 4;
+    int unionBytes = sizeof(union Number);
+    int boxBytes = sizeof(struct Box);
+    int enumBytes = sizeof(enum Color);
+    struct Box *heap = new Box();
+    heap->value = box.value;
+    int a = (int)3.5;
+    int bytes = sizeof(int);
+    int values[3];
+    int arrayBytes = sizeof(values);
+    int *p = &values[0];
+    int firstValue = first(values);
+    p = p + 2;
+    p -= 1;
+    p++;
+    --p;
+    int left = RED;
+    int after = NEXT;
+    int shadowed = RED;
+    { int RED = 9; shadowed = RED; }
+    int right = BLUE;
+    left <-> right;
+    int piped = left |> increment;
+    snapshot piped;
+    rewind piped, 2;
+    printf("value=%d, bytes=%d\n", piped, bytes);
+    scanf("%d", &piped);
+    delete heap;
+    return a + bytes + arrayBytes + unionBytes + number.i + piped + firstValue + globalCount + after + shadowed + boxBytes + enumBytes;
+}

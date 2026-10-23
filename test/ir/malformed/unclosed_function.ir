@@ -1,3 +1,0 @@
-func main() -> int {
-  %t0 = const int 1
-  ret %t0

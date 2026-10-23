@@ -1,6 +1,0 @@
-int main() {
-    int p = 1, q = 2;
-    f(a, b, c);
-    x = (1, 2);
-    return 0;
-}

@@ -1,5 +1,0 @@
-int main() {
-    float ratio = 1.5;
-    int remainder = ratio % 2;
-    return remainder;
-}

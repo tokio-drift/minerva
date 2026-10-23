@@ -1,8 +1,0 @@
-void helper(int x) {
-    x = x + 1;
-}
-
-int main() {
-    helper(2);
-    return 0;
-}

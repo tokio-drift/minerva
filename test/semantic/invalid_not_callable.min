@@ -1,5 +1,0 @@
-int main() {
-    int value = 3;
-    value();
-    return value;
-}

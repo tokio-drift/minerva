@@ -33,7 +33,7 @@ static const char *GREEN = "\033[1;32m";
 static const char *ENDCLR = "\033[0m";
 
 static void usage(const char *prog) {
-    std::cerr << "Usage: " << prog << " [--dump-ast] [--semantic] <source-file> [-o <output.ir>]\n";
+    std::cerr << "Usage: " << prog << " [--dump-ast|--dump-typed-ast] [--semantic] <source-file> [-o <output.ir>]\n";
     std::cerr << "       " << prog << " --verify-ir <file.ir>\n";
 }
 
@@ -67,6 +67,78 @@ static void printDiagnostics(const std::string &path, const std::vector<Diagnost
                   << "]: " << d.message << "\n";
     }
     std::cerr << diags.size() << " error(s)\n";
+}
+
+static const char *categoryName(ExprCategory category) {
+    switch (category) {
+    case ExprCategory::LValue: return "lvalue";
+    case ExprCategory::Void: return "void";
+    default: return "rvalue";
+    }
+}
+
+static std::string nodeDescription(const Node &node) {
+    switch (node.kind) {
+    case NodeKind::Ident: return "Ident " + static_cast<const Ident &>(node).name;
+    case NodeKind::IntLit: return "IntLit " + static_cast<const Literal &>(node).text;
+    case NodeKind::FloatLit: return "FloatLit " + static_cast<const Literal &>(node).text;
+    case NodeKind::CharLit: return "CharLit " + static_cast<const Literal &>(node).text;
+    case NodeKind::StringLit: return "StringLit";
+    case NodeKind::NullLit: return "NullLit";
+    case NodeKind::Unary: return "Unary " + static_cast<const Unary &>(node).op;
+    case NodeKind::Postfix: return "Postfix " + static_cast<const Postfix &>(node).op;
+    case NodeKind::Binary: return "Binary " + static_cast<const Binary &>(node).op;
+    case NodeKind::Assign: return "Assign " + static_cast<const Assign &>(node).op;
+    case NodeKind::Conditional: return "Conditional";
+    case NodeKind::Call: return "Call";
+    case NodeKind::Index: return "Index";
+    case NodeKind::VarDecl: return "VarDecl " + static_cast<const VarDecl &>(node).name;
+    case NodeKind::Param: return "Param " + static_cast<const VarDecl &>(node).name;
+    case NodeKind::FuncDef: return "FuncDef " + static_cast<const FuncDef &>(node).name;
+    case NodeKind::Unsupported: return "Unsupported " + static_cast<const Unsupported &>(node).what;
+    default: return "NodeKind " + std::to_string(static_cast<int>(node.kind));
+    }
+}
+
+static void dumpTypeAnnotations(const Node &node, const Analyzer &analyzer, std::ostream &out) {
+    // Declarations are listed before expressionInfo so their output is labelled
+    // as a declaration rather than as an expression value.
+    if (node.kind == NodeKind::VarDecl || node.kind == NodeKind::Param) {
+        TypeRef type = analyzer.typeOfDecl(static_cast<const VarDecl *>(&node));
+        if (type) {
+            out << node.loc.line << ':' << node.loc.col << "  " << nodeDescription(node)
+                << " => " << type->str() << " [declaration]\n";
+        }
+    } else if (node.kind == NodeKind::FuncDef) {
+        TypeRef type = analyzer.typeOfFunction(static_cast<const FuncDef *>(&node));
+        if (type) {
+            out << node.loc.line << ':' << node.loc.col << "  Function "
+                << static_cast<const FuncDef &>(node).name << " => " << type->str() << "\n";
+        }
+    } else {
+        ExprInfo expr;
+        if (analyzer.expressionInfo(&node, &expr) && expr.type) {
+            out << node.loc.line << ':' << node.loc.col << "  " << nodeDescription(node)
+                << " => " << expr.type->str() << " [" << categoryName(expr.category) << "]\n";
+        }
+    }
+    forEachChild(node, [&](const Node *child) {
+        if (child) dumpTypeAnnotations(*child, analyzer, out);
+    });
+}
+
+static int runTypedAst(const std::string &path) {
+    Analyzer analyzer;
+    analyzer.analyze(*g_program);
+    if (!analyzer.diagnostics().empty()) {
+        printDiagnostics(path, analyzer.diagnostics());
+        return 3;
+    }
+    std::cout << "TYPED AST (structural tree followed by semantic type annotations)\n";
+    dumpAst(*g_program, std::cout);
+    std::cout << "\nTYPE ANNOTATIONS\n";
+    dumpTypeAnnotations(*g_program, analyzer, std::cout);
+    return 0;
 }
 
 static int runSemantic(const std::string &path) {
@@ -188,6 +260,7 @@ static int verifyIRFile(const std::string &path) {
 
 int main(int argc, char **argv) {
     bool dumpTree = false;
+    bool dumpTypedTree = false;
     bool semanticOnly = false;
     std::string sourcePath;
     std::string outputPath;
@@ -196,6 +269,8 @@ int main(int argc, char **argv) {
         std::string arg = argv[i];
         if (arg == "--dump-ast") {
             dumpTree = true;
+        } else if (arg == "--dump-typed-ast") {
+            dumpTypedTree = true;
         } else if (arg == "--semantic") {
             semanticOnly = true;
         } else if (arg == "-o") {
@@ -264,12 +339,15 @@ int main(int argc, char **argv) {
     }
 
     int status = 0;
-    if (dumpTree) dumpAst(*g_program, std::cout);
-    if (!outputPath.empty()) {
+    if (dumpTypedTree) {
+        status = runTypedAst(sourcePath);
+    } else if (dumpTree) {
+        dumpAst(*g_program, std::cout);
+    } else if (!outputPath.empty()) {
         status = runIRPipeline(sourcePath, outputPath);
     } else if (semanticOnly) {
         status = runSemantic(sourcePath);
-    } else if (!dumpTree) {
+    } else {
         printTokenTable();
     }
     size_t unsup = countUnsupported(*g_program);

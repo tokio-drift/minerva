@@ -6,7 +6,7 @@
 #include "types.h"
 
 enum class IROp {
-    Const, Decl, Global, Copy, Conv, Binary, Unary, Compare, Call, Return, Label, Jump, Branch
+    Const, Decl, Global, Copy, Conv, Binary, Unary, Compare, Call, Return, Label, Jump, Branch, Address, Load, Store, ElementAddress
 };
 
 // An operand names a value: a temporary, a variable, a literal or a function.

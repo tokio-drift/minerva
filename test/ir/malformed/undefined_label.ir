@@ -1,4 +1,0 @@
-func main() -> int {
-  %t0 = const int 1
-  jump L1
-}

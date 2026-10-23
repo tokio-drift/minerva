@@ -1,6 +1,7 @@
 // ast.h - Minerva abstract syntax tree (Phase 1)
 #pragma once
 #include <iosfwd>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,6 +50,8 @@ struct Node {
     Node(const Node &) = delete;
     Node &operator=(const Node &) = delete;
 };
+
+void forEachChild(const Node &node, const std::function<void(const Node *)> &callback);
 
 struct Program : Node {
     NodeList items;
