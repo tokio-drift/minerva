@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Generate IR and typed AST outputs without creating any log files.
 # Usage: ./run.sh [generate|ir|ast|clean]
 set -uo pipefail
 
@@ -25,7 +24,6 @@ if [[ "$MODE" == "clean" ]]; then
   exit 0
 fi
 
-# Build from lexer/parser sources if the compiler executable is absent.
 if [[ ! -x "$EXE" ]]; then
   echo "Compiler executable missing; building from src/lexer.l and src/parser.y..."
   if ! make -C "$ROOT" minerva; then

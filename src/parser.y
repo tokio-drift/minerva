@@ -42,7 +42,6 @@ static void retagRecentToken(int line, const string &lexeme, const string &role)
     }
 }
 
-/* ---------- AST construction helpers (ownership: see ast.h) ---------- */
 static SrcLoc L(const YYLTYPE &l) { return SrcLoc{l.first_line, l.first_column}; }
 static string S(const char *s) { return s ? string(s) : string(); }
 

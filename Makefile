@@ -1,5 +1,3 @@
-# Build Minerva from the Flex lexer and Bison parser. Output generation is run separately with ./run.sh.
-
 CXX       ?= g++
 CXXFLAGS  ?= -Wall -Wno-unused-function -std=c++17 -Isrc -Ibuild
 FLEX      ?= flex
@@ -45,7 +43,6 @@ $(LEX_GEN): $(LEX_FILE) $(PARSER_HDR) | $(BUILD_STAMP)
 $(TARGET): $(LEX_GEN) $(PARSER_GEN) $(PARSER_HDR) $(CORE_SRC) $(CORE_HDR)
 	$(CXX) $(CXXFLAGS) $(LEX_GEN) $(PARSER_GEN) $(CORE_SRC) -o $@
 
-# Generate IR and typed AST for all eight test programs.
 outputs generate test: $(TARGET)
 	bash ./run.sh generate
 
@@ -55,22 +52,18 @@ generate-ir: $(TARGET)
 generate-ast: $(TARGET)
 	bash ./run.sh ast
 
-# Run one source file, e.g. make run FILE=test/01_arithmetic.min
 run: $(TARGET)
 	@test -n "$(FILE)" || { echo 'Usage: make run FILE=test/01_arithmetic.min' >&2; exit 2; }
 	./$(TARGET) "$(FILE)"
 
-# Force a fresh parser, lexer, and compiler build.
 regen:
 	rm -rf $(BUILD_DIR) $(TARGET)
 	$(MAKE) $(TARGET)
 
-# Optional Bison conflict report (written inside build/; not part of normal builds).
 conflicts: | $(BUILD_STAMP)
 	@command -v $(BISON) >/dev/null 2>&1 || { echo "Error: Bison is required." >&2; exit 1; }
 	$(BISON) -d --defines=$(BUILD_DIR)/parser.conflicts.h -o $(BUILD_DIR)/parser.conflicts.cpp $(PARSER_FILE) -Wcounterexamples --report=solved
 
-# Delete compiler outputs and all build artifacts, including the entire build folder.
 clean:
 	rm -f $(TARGET) minerva_asan
 	rm -rf $(BUILD_DIR) $(IR_DIR) $(AST_DIR) generated

@@ -1,145 +1,236 @@
 # Minerva Compiler
 
-Minerva is a C-like language compiler front end. It parses `.min` source files, performs semantic analysis, generates typed three-address-code (3AC) intermediate representation (IR), and can display the abstract syntax tree (AST) with semantic type annotations.
+Minerva is a C-like programming language compiler implemented in C++17. It parses `.min` source files, performs semantic analysis, generates typed three-address-code (3AC) intermediate representation (IR), and supports displaying the abstract syntax tree (AST) with semantic type annotations.
 
 ## Requirements
 
-Install the following tools:
+The following tools are required:
 
 - **g++** with C++17 support
-- **make**
-- **Flex**
-- **Bison**
+- **GNU Make**
+- **Flex** — lexical analyzer generator
+- **Bison** — parser generator
 
-On Debian or Ubuntu, install them with:
+On Debian or Ubuntu, install the required tools using:
 
-```sh
+```bash
 sudo apt update
 sudo apt install build-essential flex bison
 ```
 
-## Build the compiler
+## Build the Compiler
 
-Run these commands from the repository root:
+Run the following command from the project root:
 
-```sh
+```bash
 make
 ```
 
-This builds the `minerva` executable. To regenerate the lexer and parser from `src/lexer.l` and `src/parser.y`, run:
+This builds the `minerva` executable without automatically generating test output files.
 
-```sh
+To regenerate the lexer and parser from their source files and rebuild the compiler, run:
+
+```bash
 make regen
-make
 ```
 
-## Run the test programs and generate output
+The lexer specification is `src/lexer.l`, and the parser specification is `src/parser.y`. Flex and Bison are required for building the compiler from these files.
 
-The `test/` directory contains eight `.min` source programs. Run all eight through the compiler and generate both IR and typed-AST output files with:
+## Run All Test Programs
 
-```sh
+The `test/` directory contains eight `.min` test programs.
+
+To compile all test programs and generate both IR and typed-AST output files, run:
+
+```bash
 ./run.sh
 ```
 
-Equivalent commands are:
+The same operation can be performed using:
 
-```sh
-./run.sh generate
+```bash
 make generate
-make outputs
-make test
 ```
 
-The generated files are saved separately:
+The generated files are stored in the following directories at the project root:
 
-- `generated/ir/` — generated `.ir` files
-- `generated/ast/` — typed-AST `.typed.ast` files
+- `ir/` — generated `.ir` files
+- `typed_ast/` — generated `.typed.ast` files
 
-The runner builds the compiler automatically if the `minerva` executable is missing. It prints compiler messages in the terminal and does not save log files.
+The runner prints its results directly in the terminal. It does not create log files.
 
-## Run a specific source file
+## Run a Specific Source File
 
-Compile a source file and write its IR to a chosen output path:
+Compile an individual source file and generate its IR:
 
-```sh
+```bash
 ./minerva test/01_arithmetic.min -o output.ir
 ```
 
-Use the Makefile shortcut to compile a selected source file:
+Alternatively, use the Makefile shortcut:
 
-```sh
+```bash
 make run FILE=test/01_arithmetic.min
 ```
 
+## Compiler Options
+
 Verify an existing IR file:
 
-```sh
+```bash
 ./minerva --verify-ir output.ir
 ```
 
-Run semantic analysis without generating IR:
+Perform semantic analysis without generating IR:
 
-```sh
+```bash
 ./minerva --semantic test/01_arithmetic.min
 ```
 
-Print the structural AST:
+Display the structural AST:
 
-```sh
+```bash
 ./minerva --dump-ast test/01_arithmetic.min
 ```
 
-Print the AST with semantic type annotations:
+Display the AST with semantic type annotations:
 
-```sh
+```bash
 ./minerva --dump-typed-ast test/01_arithmetic.min
 ```
 
-Save the typed-AST output to a file:
+Save the typed AST to a file:
 
-```sh
-mkdir -p generated/ast
-./minerva --dump-typed-ast test/01_arithmetic.min > generated/ast/01_arithmetic.typed.ast
+```bash
+mkdir -p typed_ast
+./minerva --dump-typed-ast test/01_arithmetic.min > typed_ast/01_arithmetic.typed.ast
 ```
 
-## Runner options
+## Runner Options
 
-The runner accepts an optional mode:
+The runner supports the following modes:
 
-```sh
-./run.sh generate   # Generate both IR and typed AST for all eight programs
-./run.sh ir         # Generate only IR files
-./run.sh ast        # Generate only typed-AST files
-./run.sh clean      # Remove generated IR and typed-AST files
+```bash
+./run.sh generate
 ```
 
-The same operations are available through Make:
+Generates both IR and typed-AST files for all eight test programs.
 
-```sh
-make generate       # Generate both output types
-make generate-ir    # Generate only IR files
-make generate-ast   # Generate only typed-AST files
-make clean          # Remove the executable and generated output files
-make distclean      # Clean and remove the build directory
+```bash
+./run.sh ir
 ```
 
-`make clean` preserves the checked-in generated lexer and parser files. `make distclean` removes the `build/` directory as well; run `make regen` and then `make` to regenerate and rebuild them.
+Generates only IR files.
 
-## Test program coverage
+```bash
+./run.sh ast
+```
 
-The eight source programs cover:
+Generates only typed-AST files.
 
-1. Arithmetic
+```bash
+./run.sh clean
+```
+
+Removes the `ir/` and `typed_ast/` output directories.
+
+The equivalent Makefile commands are:
+
+```bash
+make generate
+make generate-ir
+make generate-ast
+make test
+```
+
+The `make test` command also generates both types of output for all eight programs.
+
+## Clean and Rebuild
+
+To remove the compiler executable, build directory, and generated output directories, run:
+
+```bash
+make clean
+```
+
+To perform a fresh build after cleaning:
+
+```bash
+make
+```
+
+To regenerate the lexer and parser and rebuild the compiler from the source specifications:
+
+```bash
+make regen
+```
+
+The `make distclean` command performs the same cleanup as `make clean`.
+
+After a fresh build, run the test programs again:
+
+```bash
+./run.sh
+```
+
+## Test Program Coverage
+
+The eight test programs cover:
+
+1. Arithmetic operations
 2. Control flow
 3. Arrays
-4. Struct members
+4. Structure members
 5. Function pointers
 6. Class methods
 7. Type features
 8. Runtime-call lowering
 
-The generated IR is an intermediate representation; the compiler does not execute the generated programs. Successful generation indicates that the input passed the implemented parsing, semantic-analysis, and IR-generation steps.
+## Intermediate Representation
 
-## Intermediate representation
+Minerva generates a line-oriented, typed three-address-code intermediate representation.
 
-The compiler uses a line-oriented typed 3AC format. Instructions include declarations, constants, copies, arithmetic and comparison operations, function calls, returns, labels, jumps, conditional branches, and supported memory operations such as `addr`, `load`, `store`, and `elemaddr`.
+Supported instruction categories include:
+
+- Declarations and constants
+- Copy and arithmetic operations
+- Comparisons
+- Function calls and returns
+- Labels and jumps
+- Conditional branches
+- Supported memory operations, including `addr`, `load`, `store`, and `elemaddr`
+
+The generated IR is an intermediate representation; it is not an executable program. Successful compilation indicates that the source passed the implemented parsing, semantic-analysis, and IR-generation checks.
+
+## Project Structure
+
+```text
+minerva/
+├── Makefile
+├── README.md
+├── run.sh
+├── src/
+│   ├── ast.cpp
+│   ├── ast.h
+│   ├── diagnostic.h
+│   ├── frontend.h
+│   ├── ir.cpp
+│   ├── ir.h
+│   ├── ir_generator.cpp
+│   ├── ir_generator.h
+│   ├── lexer.l
+│   ├── main.cpp
+│   ├── parser.y
+│   ├── semantic.cpp
+│   ├── semantic.h
+│   ├── types.cpp
+│   └── types.h
+├── test/
+│   └── eight .min test programs
+├── scripts/
+│   └── summarize_conflicts.py
+├── ir/
+└── typed_ast/
+```
+
+The `build/` directory is created during compilation. The `ir/` and `typed_ast/` directories are created when test outputs are generated.
