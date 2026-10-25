@@ -1,33 +1,35 @@
+
 #!/usr/bin/env bash
-# Usage: ./run.sh [generate|ir|ast|clean]
+# Usage: ./run.sh [ast|clean]
+# Default: generate IR only.
+
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODE="${1:-generate}"
+MODE="${1:-ir}"
 EXE="${MINERVA_BIN:-$ROOT/minerva}"
 TEST_DIR="$ROOT/test"
 IR_DIR="$ROOT/ir"
 AST_DIR="$ROOT/typed_ast"
 
 case "$MODE" in
-  generate|all|ir|ast|clean) ;;
+  ir|ast|clean) ;;
   *)
-    echo "Usage: $0 [generate|ir|ast|clean]" >&2
+    echo "Usage: ./run.sh [ast|clean]" >&2
     exit 2
     ;;
 esac
 
-# Remove output folders entirely; this script never creates or writes logs.
 if [[ "$MODE" == "clean" ]]; then
-  rm -rf "$IR_DIR" "$AST_DIR" "$ROOT/generated"
-  echo "Removed IR and typed AST output folders."
+  rm -rf "$IR_DIR" "$AST_DIR"
+  echo "Generated output folders removed."
   exit 0
 fi
 
 if [[ ! -x "$EXE" ]]; then
-  echo "Compiler executable missing; building from src/lexer.l and src/parser.y..."
-  if ! make -C "$ROOT" minerva; then
-    echo "Build failed; see the compiler errors above." >&2
+  echo "Compiler executable missing. Building compiler..."
+  if ! make -C "$ROOT"; then
+    echo "Build failed." >&2
     exit 2
   fi
 fi
@@ -35,59 +37,54 @@ fi
 shopt -s nullglob
 SOURCES=("$TEST_DIR"/*.min)
 shopt -u nullglob
+
 if [[ ${#SOURCES[@]} -ne 8 ]]; then
-  echo "Expected exactly 8 test programs in $TEST_DIR; found ${#SOURCES[@]}." >&2
+  echo "Expected exactly 8 .min test programs in $TEST_DIR; found ${#SOURCES[@]}." >&2
   exit 2
 fi
 
-mkdir -p "$IR_DIR" "$AST_DIR"
-if [[ "$MODE" == "generate" || "$MODE" == "all" || "$MODE" == "ir" ]]; then
+if [[ "$MODE" == "ir" ]]; then
+  mkdir -p "$IR_DIR"
   rm -f "$IR_DIR"/*.ir
-fi
-if [[ "$MODE" == "generate" || "$MODE" == "all" || "$MODE" == "ast" ]]; then
+else
+  mkdir -p "$AST_DIR"
   rm -f "$AST_DIR"/*.typed.ast
 fi
 
 pass=0
 fail=0
+
 for SRC in "${SOURCES[@]}"; do
   BASE="$(basename "${SRC%.min}")"
-  FILE_OK=1
   printf '\n== %s ==\n' "$(basename "$SRC")"
 
-  if [[ "$MODE" == "generate" || "$MODE" == "all" || "$MODE" == "ir" ]]; then
+  if [[ "$MODE" == "ir" ]]; then
     if "$EXE" "$SRC" -o "$IR_DIR/$BASE.ir"; then
-      echo "IR generated: $IR_DIR/$BASE.ir"
+      echo "IR generated: ir/$BASE.ir"
+      pass=$((pass + 1))
     else
-      echo "IR generation FAILED for $SRC" >&2
+      echo "IR generation failed: $SRC" >&2
       rm -f "$IR_DIR/$BASE.ir"
-      FILE_OK=0
+      fail=$((fail + 1))
     fi
-  fi
-
-  if [[ "$MODE" == "generate" || "$MODE" == "all" || "$MODE" == "ast" ]]; then
-    if "$EXE" --dump-typed-ast "$SRC" > "$AST_DIR/$BASE.typed.ast"; then
-      echo "Typed AST generated: $AST_DIR/$BASE.typed.ast"
-    else
-      echo "Typed AST generation FAILED for $SRC" >&2
-      rm -f "$AST_DIR/$BASE.typed.ast"
-      FILE_OK=0
-    fi
-  fi
-
-  if [[ "$FILE_OK" -eq 1 ]]; then
-    pass=$((pass + 1))
   else
-    fail=$((fail + 1))
+    if "$EXE" --dump-typed-ast "$SRC" > "$AST_DIR/$BASE.typed.ast"; then
+      echo "Typed AST generated: typed_ast/$BASE.typed.ast"
+      pass=$((pass + 1))
+    else
+      echo "Typed AST generation failed: $SRC" >&2
+      rm -f "$AST_DIR/$BASE.typed.ast"
+      fail=$((fail + 1))
+    fi
   fi
 done
 
 echo
-echo "Test programs successful: $pass/8"
-if [[ "$MODE" == "generate" || "$MODE" == "all" || "$MODE" == "ir" ]]; then
-  echo "IR files: $(find "$IR_DIR" -maxdepth 1 -type f -name '*.ir' | wc -l | tr -d ' ')"
+echo "Successful: $pass/${#SOURCES[@]}"
+echo "Failed: $fail"
+
+if [[ "$fail" -eq 0 ]]; then
+  exit 0
+else
+  exit 1
 fi
-if [[ "$MODE" == "generate" || "$MODE" == "all" || "$MODE" == "ast" ]]; then
-  echo "Typed AST files: $(find "$AST_DIR" -maxdepth 1 -type f -name '*.typed.ast' | wc -l | tr -d ' ')"
-fi
-[[ "$fail" -eq 0 ]]

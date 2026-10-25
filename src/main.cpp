@@ -1,4 +1,3 @@
-// main.cpp - command line driver
 #include <cstdio>
 #include <cstring>
 #include <fstream>

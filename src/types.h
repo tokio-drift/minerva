@@ -1,4 +1,3 @@
-// types.h - type representation used by the semantic phase
 #pragma once
 #include <memory>
 #include <string>

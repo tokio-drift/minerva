@@ -1,4 +1,3 @@
-// semantic.h - symbol table, type checking and diagnostics
 #pragma once
 #include <string>
 #include <unordered_map>
