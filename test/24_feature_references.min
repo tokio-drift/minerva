@@ -1,6 +1,0 @@
-int main() {
-    int value = 8;
-    int &alias = value;
-    alias = alias + 1;
-    return value;
-}
