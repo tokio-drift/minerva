@@ -86,12 +86,14 @@ The test programs cover:
 1. Arithmetic and logical operators
 2. If/else, loops, switch, break/continue, and goto
 3. Integer and character arrays, array initialization, and pointer arithmetic
+4. Multi Dimensional Array
 4. Pointers, multilevel pointers, and function pointers
-5. Structs, classes, inheritance, and access modifiers
+5. Structs, classes, very basic inheritance, and access modifiers
 6. Typedefs, enums, unions, references, and static declarations
-7. Function calls, arguments, and recursion
-8. printf/scanf and runtime-call lowering
-9. Regression tests for pointer/array edge cases
+7. Function calls, arguments, and basic recursion
+8. printf/scanf
+
+NOTE: Assigning string literal to char pointer is not possible, string is not supported, unsigned is not supported and Dynamic Memory and Array Flattening is not supported.
 
 ## Project structure
 
@@ -122,19 +124,3 @@ minerva/
 ```
 
 The `build/` directory is created during compilation and contains generated lexer and parser files.
-
-## Pointer and array regression coverage
-
-The regression suite includes `test/25_pointer_array_edges.c` through
-`test/29_char_array_pointer_init.c`. These cover pointer subtraction (in
-array-element units), pointer ordering, pointer compound assignment, pointer
-increment/decrement through lvalues, multilevel pointers, array-to-pointer
-decay, partial array initialization, multidimensional and three-dimensional
-array indexing/initialization, and character-array string initialization.
-
-`./run.sh ir` and `./run.sh ast` validate compiler front-end/IR generation; they
-are not a native execution engine, so passing these checks does not prove the
-runtime behavior of every generated program or all C/C++ undefined-behavior
-cases. Pointer arithmetic still requires pointers to refer to the same array
-object (or one past it), and out-of-bounds dereferences remain invalid source
-program behavior.
