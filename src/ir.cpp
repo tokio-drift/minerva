@@ -178,7 +178,7 @@ bool parseOperand(const std::string &text, IROperand *out) {
 }
 
 const char *constBinaryOpNames[] = {"add", "sub", "mul", "div", "mod",
-                                    "bitand", "bitor", "bitxor", "shl", "shr"};
+                                    "bitand", "bitor", "bitxor", "shl", "shr", "ptrdiff"};
 const char *constUnaryOpNames[] = {"neg", "not", "bitnot"};
 const char *constCompareOpNames[] = {"eq", "ne", "lt", "le", "gt", "ge"};
 

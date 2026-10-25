@@ -35,7 +35,7 @@ Run:
 ./run.sh
 ```
 
-This compiles all eight `.min` test programs and writes their IR files into the root-level `ir/` directory. Results are displayed in the terminal.
+This compiles every supported source file (`.min`, `.c`, `.cpp`, `.cc`, `.cxx`, and `.C`) under `test/` and writes their IR files into the root-level `ir/` directory. Results are displayed in the terminal.
 
 The script builds the compiler automatically if the executable is missing.
 
@@ -81,16 +81,17 @@ To generate IR for one source program:
 
 ## Test coverage
 
-The eight test programs cover:
+The test programs cover:
 
-1. Arithmetic
-2. Control flow
-3. Arrays
-4. Struct members
-5. Function pointers
-6. Class methods
-7. Type features
-8. Runtime-call lowering
+1. Arithmetic and logical operators
+2. If/else, loops, switch, break/continue, and goto
+3. Integer and character arrays, array initialization, and pointer arithmetic
+4. Pointers, multilevel pointers, and function pointers
+5. Structs, classes, inheritance, and access modifiers
+6. Typedefs, enums, unions, references, and static declarations
+7. Function calls, arguments, and recursion
+8. printf/scanf and runtime-call lowering
+9. Regression tests for pointer/array edge cases
 
 ## Project structure
 
@@ -121,3 +122,19 @@ minerva/
 ```
 
 The `build/` directory is created during compilation and contains generated lexer and parser files.
+
+## Pointer and array regression coverage
+
+The regression suite includes `test/25_pointer_array_edges.c` through
+`test/29_char_array_pointer_init.c`. These cover pointer subtraction (in
+array-element units), pointer ordering, pointer compound assignment, pointer
+increment/decrement through lvalues, multilevel pointers, array-to-pointer
+decay, partial array initialization, multidimensional and three-dimensional
+array indexing/initialization, and character-array string initialization.
+
+`./run.sh ir` and `./run.sh ast` validate compiler front-end/IR generation; they
+are not a native execution engine, so passing these checks does not prove the
+runtime behavior of every generated program or all C/C++ undefined-behavior
+cases. Pointer arithmetic still requires pointers to refer to the same array
+object (or one past it), and out-of-bounds dereferences remain invalid source
+program behavior.

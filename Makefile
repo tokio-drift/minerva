@@ -18,12 +18,10 @@ CORE_SRC := src/ast.cpp src/types.cpp src/semantic.cpp src/ir.cpp \
 CORE_HDR := src/ast.h src/types.h src/semantic.h src/frontend.h \
             src/diagnostic.h src/ir.h src/ir_generator.h
 
-.PHONY: all minerva clean regen
+.PHONY: all clean regen
 
 # Default command: build the compiler only.
 all: $(TARGET)
-
-minerva: $(TARGET)
 
 $(BUILD_STAMP):
 	mkdir -p $(BUILD_DIR)

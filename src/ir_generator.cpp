@@ -585,6 +585,37 @@ void IRGenerator::lowerDeclaration(const VarDecl &decl) {
     function_->body.push_back(ins);
 
     if (!decl.init) return;
+    if (decl.init->kind == NodeKind::StringLit && type->isArray() && type->sub && type->sub->kind == TypeKind::Char) {
+        const std::string &raw = static_cast<const Literal *>(decl.init.get())->text;
+        std::vector<unsigned char> bytes;
+        for (size_t i = 1; i + 1 < raw.size(); ++i) {
+            unsigned char ch = static_cast<unsigned char>(raw[i]);
+            if (ch == '\\' && i + 2 < raw.size()) {
+                char esc = raw[++i];
+                switch (esc) {
+                case 'n': ch = '\n'; break; case 't': ch = '\t'; break; case 'r': ch = '\r'; break;
+                case '0': ch = 0; break; case '\\': ch = '\\'; break; case '\"': ch = '\"'; break;
+                default: ch = static_cast<unsigned char>(esc); break;
+                }
+            }
+            bytes.push_back(ch);
+        }
+        bytes.push_back(0);
+        const size_t capacity = (!type->dims.empty() && type->dims[0] >= 0) ? static_cast<size_t>(type->dims[0]) : bytes.size();
+        if (bytes.size() > capacity) { unsupported(decl.init->loc, "string literal is too long for character array"); return; }
+        for (size_t i = 0; i < capacity; ++i) {
+            IROperand index = emitConstant(makeType(TypeKind::Int), std::to_string(i));
+            TypeRef ptrType = makePointer(type->sub);
+            IRInstruction address; address.op = IROp::ElementAddress; address.type = ptrType;
+            address.dest = IROperand::temp(newTemp(), ptrType); address.args = {IROperand::variable(name, type), index};
+            function_->body.push_back(address);
+            unsigned int value = i < bytes.size() ? bytes[i] : 0;
+            IROperand constant = emitConstant(makeType(TypeKind::Char), std::to_string(value));
+            IRInstruction store; store.op = IROp::Store; store.type = type->sub; store.args = {address.dest, constant};
+            function_->body.push_back(store);
+        }
+        return;
+    }
     if (decl.init->kind == NodeKind::InitList) {
         if (!type->isArray()) {
             unsupported(decl.init->loc, "initializer lists are supported only for arrays in this lowering");
@@ -602,24 +633,55 @@ void IRGenerator::lowerDeclaration(const VarDecl &decl) {
                 list.elems.size() > static_cast<size_t>(arrayType->dims[0])) {
                 unsupported(list.loc, "too many array initializer elements"); return;
             }
-            for (size_t i = 0; i < list.elems.size(); ++i) {
+            auto elementAddress = [&](size_t i) {
                 IROperand index = emitConstant(makeType(TypeKind::Int), std::to_string(i));
                 TypeRef ptrType = makePointer(elementType);
                 IRInstruction address; address.op = IROp::ElementAddress; address.type = ptrType;
                 address.dest = IROperand::temp(newTemp(), ptrType); address.args = {base, index};
                 function_->body.push_back(address);
+                return address.dest;
+            };
+            auto zeroInitialize = [&](auto &&self, const IROperand &where, TypeRef t) -> void {
+                if (failed_) return;
+                if (t && t->isArray()) {
+                    TypeRef child = t->sub;
+                    if (t->dims.size() > 1) child = makeArray(t->sub, std::vector<long long>(t->dims.begin()+1, t->dims.end()));
+                    if (t->dims.empty() || t->dims[0] < 0) return;
+                    for (long long j = 0; j < t->dims[0]; ++j) {
+                        IROperand ix = emitConstant(makeType(TypeKind::Int), std::to_string(j));
+                        TypeRef pt = makePointer(child);
+                        IRInstruction a; a.op = IROp::ElementAddress; a.type = pt;
+                        a.dest = IROperand::temp(newTemp(), pt); a.args = {where, ix};
+                        function_->body.push_back(a);
+                        self(self, a.dest, child);
+                    }
+                } else {
+                    IROperand zero = emitConstant(t, t && t->kind == TypeKind::Pointer ? "0" : "0");
+                    IRInstruction store; store.op = IROp::Store; store.type = t; store.args = {where, zero};
+                    function_->body.push_back(store);
+                }
+            };
+            for (size_t i = 0; i < list.elems.size(); ++i) {
+                IROperand elementAddressValue = elementAddress(i);
                 Node *entry = list.elems[i].get();
                 if (elementType->isArray()) {
                     if (!entry || entry->kind != NodeKind::InitList) {
                         unsupported(entry ? entry->loc : list.loc, "nested array elements require nested initializer lists"); return;
                     }
-                    initializeArray(*static_cast<const InitList *>(entry), address.dest, elementType);
+                    initializeArray(*static_cast<const InitList *>(entry), elementAddressValue, elementType);
                 } else {
                     IROperand value = lowerExpression(entry);
                     if (failed_) return;
                     value = emitConvert(value, elementType);
                     IRInstruction store; store.op = IROp::Store; store.type = elementType;
-                    store.args = {address.dest, value}; function_->body.push_back(store);
+                    store.args = {elementAddressValue, value}; function_->body.push_back(store);
+                }
+            }
+            // C-style aggregate initialization zero-fills omitted elements.
+            if (!arrayType->dims.empty() && arrayType->dims[0] >= 0) {
+                for (size_t i = list.elems.size(); i < static_cast<size_t>(arrayType->dims[0]); ++i) {
+                    IROperand elementAddressValue = elementAddress(i);
+                    zeroInitialize(zeroInitialize, elementAddressValue, elementType);
                 }
             }
         };
@@ -738,8 +800,8 @@ IROperand IRGenerator::lowerExpression(Node *node) {
         unsupported(node->loc, "string literals are supported as printf/scanf format operands only");
         return IROperand();
     case NodeKind::NullLit:
-        unsupported(node->loc, "the null literal is lowered with the pointer phase");
-        return IROperand();
+        // nullptr is represented as a typed null pointer constant in the IR.
+        return emitConstant(makePointer(makeType(TypeKind::Void)), "0");
     case NodeKind::Ident:
         return lowerIdentifier(*static_cast<const Ident *>(node));
     case NodeKind::Unary:
@@ -933,13 +995,34 @@ IROperand IRGenerator::lowerUnary(const Unary &node) {
         function_->body.push_back(load); return load.dest;
     }
     if (op == "++" || op == "--") {
-        IROperand target = lowerExpression(node.operand.get());
-        if (failed_) return IROperand();
-        if (target.kind != IROperand::Kind::Variable) {
-            unsupported(node.loc, "the operand of '" + op + "' must be a variable");
-            return IROperand();
+        TypeRef targetType = typeOfExpression(node.operand.get());
+        if (!targetType) { irError(node.loc, "no type for increment/decrement operand"); return IROperand(); }
+        if (node.operand && node.operand->kind == NodeKind::Ident) {
+            IROperand target = lowerExpression(node.operand.get());
+            if (failed_) return IROperand();
+            if (target.kind == IROperand::Kind::Variable) return emitStep(target, op == "++", false);
         }
-        return emitStep(target, op == "++", false);
+        IROperand address = lowerAddress(node.operand.get());
+        if (failed_) return IROperand();
+        IRInstruction load; load.op = IROp::Load; load.type = targetType;
+        load.dest = IROperand::temp(newTemp(), targetType); load.args = {address};
+        function_->body.push_back(load);
+        IROperand oldValue = load.dest;
+        IROperand value;
+        if (targetType->isPointer()) {
+            IROperand one = emitConstant(makeType(TypeKind::Int), op == "++" ? "1" : "-1");
+            IRInstruction step; step.op = IROp::ElementAddress; step.type = targetType;
+            step.dest = IROperand::temp(newTemp(), targetType); step.args = {oldValue, one};
+            function_->body.push_back(step); value = step.dest;
+        } else {
+            TypeRef arithmetic = promote(targetType);
+            IROperand one = emitConstant(arithmetic, "1");
+            value = emitBinary(arithmetic, op == "++" ? "add" : "sub", emitConvert(oldValue, arithmetic), one);
+            value = emitConvert(value, targetType);
+        }
+        IRInstruction store; store.op = IROp::Store; store.type = targetType; store.args = {address, value};
+        function_->body.push_back(store);
+        return value;
     }
 
     IROperand operand = lowerExpression(node.operand.get());
@@ -987,13 +1070,32 @@ IROperand IRGenerator::lowerUnary(const Unary &node) {
 }
 
 IROperand IRGenerator::lowerPostfix(const Postfix &node) {
-    IROperand target = lowerExpression(node.operand.get());
-    if (failed_) return IROperand();
-    if (target.kind != IROperand::Kind::Variable) {
-        unsupported(node.loc, "the operand of '" + node.op + "' must be a variable");
-        return IROperand();
+    if (node.operand && node.operand->kind == NodeKind::Ident) {
+        IROperand target = lowerExpression(node.operand.get());
+        if (failed_) return IROperand();
+        if (target.kind == IROperand::Kind::Variable) return emitStep(target, node.op == "++", true);
     }
-    return emitStep(target, node.op == "++", true);
+    TypeRef targetType = typeOfExpression(node.operand.get());
+    IROperand address = lowerAddress(node.operand.get());
+    if (failed_) return IROperand();
+    IRInstruction load; load.op = IROp::Load; load.type = targetType;
+    load.dest = IROperand::temp(newTemp(), targetType); load.args = {address};
+    function_->body.push_back(load);
+    IROperand oldValue = load.dest, value;
+    if (targetType && targetType->isPointer()) {
+        IROperand one = emitConstant(makeType(TypeKind::Int), node.op == "++" ? "1" : "-1");
+        IRInstruction step; step.op = IROp::ElementAddress; step.type = targetType;
+        step.dest = IROperand::temp(newTemp(), targetType); step.args = {oldValue, one};
+        function_->body.push_back(step); value = step.dest;
+    } else {
+        TypeRef arithmetic = promote(targetType);
+        IROperand one = emitConstant(arithmetic, "1");
+        value = emitBinary(arithmetic, node.op == "++" ? "add" : "sub", emitConvert(oldValue, arithmetic), one);
+        value = emitConvert(value, targetType);
+    }
+    IRInstruction store; store.op = IROp::Store; store.type = targetType; store.args = {address, value};
+    function_->body.push_back(store);
+    return oldValue;
 }
 
 IROperand IRGenerator::lowerBinary(const Binary &node) {
@@ -1046,6 +1148,12 @@ IROperand IRGenerator::lowerBinary(const Binary &node) {
     IROperand rhs = lowerExpression(node.rhs.get());
     if (failed_) return IROperand();
 
+    // Pointer subtraction is measured in elements, not bytes. Preserve both
+    // pointer operands and encode the operation explicitly for downstream IR.
+    if (op == "-" && lhs.type && rhs.type && lhs.type->isPointer() && rhs.type->isPointer()) {
+        return emitBinary(makeType(TypeKind::Int), "ptrdiff", lhs, rhs);
+    }
+
     if ((op == "+" || op == "-") &&
         ((lhs.type && lhs.type->isPointer() && rhs.type && rhs.type->isInteger()) ||
          (op == "+" && rhs.type && rhs.type->isPointer() && lhs.type && lhs.type->isInteger()))) {
@@ -1062,13 +1170,17 @@ IROperand IRGenerator::lowerBinary(const Binary &node) {
         function_->body.push_back(address); return address.dest;
     }
     if (isComparison(op)) {
-        TypeRef common = commonType(lhs.type, rhs.type);
-        lhs = emitConvert(lhs, common);
-        rhs = emitConvert(rhs, common);
+        // Pointer comparisons preserve pointer operands; only arithmetic values
+        // are converted to a common type. The comparison expression itself is int.
+        if (!(lhs.type && lhs.type->isPointer() && rhs.type && rhs.type->isPointer())) {
+            TypeRef common = commonType(lhs.type, rhs.type);
+            lhs = emitConvert(lhs, common);
+            rhs = emitConvert(rhs, common);
+        }
         IRInstruction ins;
         ins.op = IROp::Compare;
         ins.mnemonic = comparisonMnemonic(op);
-        ins.type = common;
+        ins.type = makeType(TypeKind::Int);
         ins.dest = IROperand::temp(newTemp(), makeType(TypeKind::Int));
         ins.args.push_back(lhs);
         ins.args.push_back(rhs);

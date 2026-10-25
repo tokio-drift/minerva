@@ -23,6 +23,16 @@ long long parseIntLiteral(const std::string &text) {
 
 bool unknownType(const TypeRef &t) { return !t || t->kind == TypeKind::Unknown; }
 
+long long stringLiteralLength(const std::string &text) {
+    if (text.size() < 2) return 1; // include the terminating NUL
+    long long count = 0;
+    for (size_t i = 1; i + 1 < text.size(); ++i) {
+        if (text[i] == '\\' && i + 2 < text.size()) ++i;
+        ++count;
+    }
+    return count + 1; // C string terminator
+}
+
 TypeRef adjustedParameterType(TypeRef type) {
     if (!type || !type->isArray()) return type;
     if (type->dims.size() <= 1) return makePointer(type->sub);
@@ -709,6 +719,13 @@ void Analyzer::checkDeclaration(const VarDecl &decl) {
         error(decl.loc, "invalid-declaration", "declaration does not declare a name");
         return;
     }
+    if (decl.init && decl.init->kind == NodeKind::StringLit && type->isArray() &&
+        type->sub && type->sub->kind == TypeKind::Char && !type->dims.empty() && type->dims[0] < 0) {
+        const std::string &literal = static_cast<const Literal *>(decl.init.get())->text;
+        auto sized = std::make_shared<Type>(*type);
+        sized->dims[0] = stringLiteralLength(literal);
+        type = sized;
+    }
     if (decl.init && decl.init->kind == NodeKind::InitList && type->isArray() &&
         !type->dims.empty() && type->dims[0] < 0) {
         auto sized = std::make_shared<Type>(*type);
@@ -723,6 +740,13 @@ void Analyzer::checkDeclaration(const VarDecl &decl) {
 
 void Analyzer::checkInitializer(const VarDecl &decl, const TypeRef &type) {
     if (!decl.init) return;
+    if (decl.init->kind == NodeKind::StringLit && type->isArray() && type->sub && type->sub->kind == TypeKind::Char) {
+        const std::string &literal = static_cast<const Literal *>(decl.init.get())->text;
+        const long long required = stringLiteralLength(literal) - 1;
+        if (!type->dims.empty() && type->dims[0] >= 0 && required > type->dims[0])
+            error(decl.loc, "invalid-initializer", "string literal is too long for character array");
+        return;
+    }
     if (decl.init->kind == NodeKind::InitList) {
         const InitList &list = *static_cast<const InitList *>(decl.init.get());
         if (!type->isArray()) {
@@ -733,18 +757,43 @@ void Analyzer::checkInitializer(const VarDecl &decl, const TypeRef &type) {
             }
             return;
         }
-        TypeRef element = type->sub ? type->sub : makeUnknown();
-        for (const auto &e : list.elems) {
-            if (!e) continue;
-            ExprInfo value = decay(checkExpression(e.get()));
-            if (!assignable(element, value.type))
-                error(e->loc, "type-mismatch",
-                      "incompatible element type ('" + element->str() + "' expected, '" +
-                          value.type->str() + "' given)");
-        }
-        if (!type->dims.empty() && type->dims[0] >= 0 &&
-            static_cast<long long>(list.elems.size()) > type->dims[0])
-            error(decl.loc, "invalid-initializer", "too many initializers for '" + type->str() + "'");
+        std::function<void(TypeRef, const InitList &, const SrcLoc &)> validateList;
+        validateList = [&](TypeRef arrayType, const InitList &items, const SrcLoc &loc) {
+            if (!arrayType || !arrayType->isArray()) {
+                error(loc, "invalid-initializer", "brace initializer requires an array type");
+                return;
+            }
+            if (!arrayType->dims.empty() && arrayType->dims[0] >= 0 &&
+                static_cast<long long>(items.elems.size()) > arrayType->dims[0]) {
+                error(loc, "invalid-initializer", "too many initializers for '" + arrayType->str() + "'");
+            }
+            TypeRef element = arrayType->sub ? arrayType->sub : makeUnknown();
+            if (arrayType->dims.size() > 1)
+                element = makeArray(arrayType->sub,
+                    std::vector<long long>(arrayType->dims.begin() + 1, arrayType->dims.end()));
+            for (const auto &entry : items.elems) {
+                if (!entry) continue;
+                if (element->isArray()) {
+                    if (entry->kind != NodeKind::InitList) {
+                        error(entry->loc, "invalid-initializer", "nested array element requires a brace initializer");
+                        checkExpression(entry.get());
+                    } else {
+                        validateList(element, *static_cast<const InitList *>(entry.get()), entry->loc);
+                    }
+                } else {
+                    if (entry->kind == NodeKind::InitList) {
+                        error(entry->loc, "invalid-initializer", "scalar array element cannot use a nested brace list");
+                        continue;
+                    }
+                    ExprInfo value = decay(checkExpression(entry.get()));
+                    if (!assignable(element, value.type))
+                        error(entry->loc, "type-mismatch",
+                              "incompatible element type ('" + element->str() + "' expected, '" +
+                                  value.type->str() + "' given)");
+                }
+            }
+        };
+        validateList(type, list, decl.loc);
         return;
     }
     ExprInfo value = decay(checkExpression(decl.init.get()));
@@ -1326,17 +1375,29 @@ ExprInfo Analyzer::checkBinary(const Binary &b) {
     if (unknownType(left.type) || unknownType(right.type))
         return {makeUnknown(), ExprCategory::RValue};
 
+    // Arrays and functions undergo their usual conversions before operators are
+    // checked. This is essential for expressions such as (array + 3) - array.
+    ExprInfo l = decay(left), r = decay(right);
+    const bool lp = l.type && l.type->isPointer();
+    const bool rp = r.type && r.type->isPointer();
+    const bool compatiblePointers = lp && rp && l.type->sub && r.type->sub &&
+        (sameType(l.type->sub, r.type->sub) || l.type->sub->kind == TypeKind::Void ||
+         r.type->sub->kind == TypeKind::Void);
+    const bool objectPointer = [](const TypeRef &t) {
+        return t && t->isPointer() && t->sub && t->sub->kind != TypeKind::Void &&
+               t->sub->kind != TypeKind::Function;
+    }(l.type);
+
     if (op == "+" || op == "-") {
-        ExprInfo l = decay(left), r = decay(right);
-        if (l.type->isPointer() && l.type->sub && l.type->sub->kind != TypeKind::Void &&
-            l.type->sub->kind != TypeKind::Function && r.type->isInteger()) return {l.type, ExprCategory::RValue};
-        if (op == "+" && l.type->isInteger() && r.type->isPointer() && r.type->sub &&
-            r.type->sub->kind != TypeKind::Void && r.type->sub->kind != TypeKind::Function)
+        if (objectPointer && r.type->isInteger()) return {l.type, ExprCategory::RValue};
+        if (op == "+" && rp && r.type->sub && r.type->sub->kind != TypeKind::Void &&
+            r.type->sub->kind != TypeKind::Function && l.type->isInteger())
             return {r.type, ExprCategory::RValue};
+        if (op == "-" && compatiblePointers) return {makeType(TypeKind::Int), ExprCategory::RValue};
     }
 
     if (op == "&&" || op == "||") {
-        if (!decay(left).type->isScalar() || !decay(right).type->isScalar())
+        if (!l.type->isScalar() || !r.type->isScalar())
             error(b.loc, "invalid-operand",
                   "invalid operands to binary '" + op + "' ('" + left.type->str() + "' and '" +
                       right.type->str() + "')");
@@ -1344,8 +1405,9 @@ ExprInfo Analyzer::checkBinary(const Binary &b) {
     }
 
     if (op == "==" || op == "!=") {
-        bool comparable = (left.type->isNumeric() && right.type->isNumeric()) ||
-                          (left.type->isPointer() && right.type->isPointer());
+        bool nullComparison = (lp && right.type->kind == TypeKind::Unknown) ||
+                              (rp && left.type->kind == TypeKind::Unknown);
+        bool comparable = (l.type->isNumeric() && r.type->isNumeric()) || compatiblePointers || nullComparison;
         if (!comparable)
             error(b.loc, "type-mismatch",
                   "incompatible operand types to binary '" + op + "' ('" + left.type->str() +
@@ -1354,7 +1416,10 @@ ExprInfo Analyzer::checkBinary(const Binary &b) {
     }
 
     if (op == "<" || op == ">" || op == "<=" || op == ">=") {
-        if (!left.type->isNumeric() || !right.type->isNumeric())
+        bool comparable = (l.type->isNumeric() && r.type->isNumeric()) ||
+                          (compatiblePointers && l.type->sub->kind != TypeKind::Void &&
+                           r.type->sub->kind != TypeKind::Void);
+        if (!comparable)
             error(b.loc, "invalid-operand",
                   "invalid operands to binary '" + op + "' ('" + left.type->str() + "' and '" +
                       right.type->str() + "')");
@@ -1362,34 +1427,34 @@ ExprInfo Analyzer::checkBinary(const Binary &b) {
     }
 
     if (op == "<<" || op == ">>") {
-        if (!left.type->isInteger() || !right.type->isInteger())
+        if (!l.type->isInteger() || !r.type->isInteger())
             error(b.loc, "invalid-operand",
                   "invalid operands to binary '" + op + "' ('" + left.type->str() + "' and '" +
                       right.type->str() + "')");
-        return {promote(left.type), ExprCategory::RValue};
+        return {promote(l.type), ExprCategory::RValue};
     }
 
     if (op == "&" || op == "|" || op == "^") {
-        if (!left.type->isInteger() || !right.type->isInteger())
+        if (!l.type->isInteger() || !r.type->isInteger())
             error(b.loc, "invalid-operand",
                   "invalid operands to binary '" + op + "' ('" + left.type->str() + "' and '" +
                       right.type->str() + "')");
-        return {usualArithmetic(left.type, right.type), ExprCategory::RValue};
+        return {usualArithmetic(l.type, r.type), ExprCategory::RValue};
     }
 
-    if (!left.type->isNumeric() || !right.type->isNumeric()) {
+    if (!l.type->isNumeric() || !r.type->isNumeric()) {
         error(b.loc, "invalid-operand",
               "invalid operands to binary '" + op + "' ('" + left.type->str() + "' and '" +
                   right.type->str() + "')");
         return {makeUnknown(), ExprCategory::RValue};
     }
-    if (op == "%" && (!left.type->isInteger() || !right.type->isInteger())) {
+    if (op == "%" && (!l.type->isInteger() || !r.type->isInteger())) {
         error(b.loc, "invalid-operand",
               "invalid operands to binary '%' ('" + left.type->str() + "' and '" +
                   right.type->str() + "')");
         return {makeUnknown(), ExprCategory::RValue};
     }
-    return {usualArithmetic(left.type, right.type), ExprCategory::RValue};
+    return {usualArithmetic(l.type, r.type), ExprCategory::RValue};
 }
 
 ExprInfo Analyzer::checkAssign(const Assign &a) {
