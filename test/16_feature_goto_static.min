@@ -1,0 +1,11 @@
+int main() {
+    static int counter = 0;
+    int i = 0;
+start:
+    i++;
+    if (i < 3) goto start;
+    if (i == 3) goto done;
+    counter = -1;
+done:
+    return counter + i;
+}

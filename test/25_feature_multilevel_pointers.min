@@ -1,0 +1,8 @@
+int main() {
+    int value = 9;
+    int *p = &value;
+    int **pp = &p;
+    int ***ppp = &pp;
+    ***ppp = 11;
+    return value;
+}

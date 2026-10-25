@@ -1,0 +1,12 @@
+int main() {
+    int a = 12, b = 5;
+    int x = a + b - a * b / 2 % 3;
+    x += 1; x -= 1; x *= 2; x /= 2; x %= 5;
+    x = (a << 1) + (b >> 1);
+    x = (a & b) | (a ^ b);
+    x = ~x;
+    int eq = (a == b) || (a != b) && (a >= b) && (a <= b) && (a > b) && (a < b);
+    int logic = !eq || (a && b);
+    x = eq ? x : -x;
+    return x + logic;
+}

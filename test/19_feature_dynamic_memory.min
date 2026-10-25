@@ -1,0 +1,8 @@
+struct Cell { int value; };
+int main() {
+    struct Cell *p = new Cell;
+    p->value = 42;
+    int result = p->value;
+    delete p;
+    return result;
+}

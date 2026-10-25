@@ -1,0 +1,14 @@
+class Vault {
+private:
+    int secret;
+protected:
+    int protectedValue;
+public:
+    int init(int x) { secret = x; protectedValue = x + 1; return secret; }
+    int read() { return secret + protectedValue; }
+};
+class ChildVault : public Vault {
+public:
+    int readProtected() { return protectedValue; }
+};
+int main() { ChildVault v; v.init(4); return v.read() + v.readProtected(); }

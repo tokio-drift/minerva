@@ -1,0 +1,10 @@
+class Base {
+public:
+    int value;
+    int set(int x) { value = x; return value; }
+};
+class Child : public Base {
+public:
+    int twice() { return value * 2; }
+};
+int main() { Child c; c.set(6); return c.twice(); }

@@ -1,0 +1,10 @@
+typedef int Count;
+enum Color { RED, GREEN = 5, BLUE };
+union Number { int i; char c; };
+int main() {
+    Count n = 3;
+    union Number u;
+    u.i = n;
+    enum Color color = GREEN;
+    return u.i + color + BLUE;
+}

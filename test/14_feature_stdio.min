@@ -1,0 +1,6 @@
+int main() {
+    int value = 1;
+    printf("value=%d\\n", value);
+    scanf("%d", &value);
+    return value;
+}

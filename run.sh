@@ -38,8 +38,8 @@ shopt -s nullglob
 SOURCES=("$TEST_DIR"/*.min)
 shopt -u nullglob
 
-if [[ ${#SOURCES[@]} -ne 8 ]]; then
-  echo "Expected exactly 8 .min test programs in $TEST_DIR; found ${#SOURCES[@]}." >&2
+if [[ ${#SOURCES[@]} -ne 25 ]]; then
+  echo "Expected exactly 25 .min test programs in $TEST_DIR; found ${#SOURCES[@]}." >&2
   exit 2
 fi
 
