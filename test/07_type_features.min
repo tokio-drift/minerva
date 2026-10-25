@@ -1,0 +1,9 @@
+int main() {
+    char c = 'a';
+    float f = 1.5;
+    int i = 2;
+    const int limit = 10;
+    int sum = c + i;
+    float g = f + i;
+    return sum + limit;
+}

@@ -1,47 +1,49 @@
-CXX      := g++
-CXXFLAGS := -Wall -Wno-unused-function -std=c++17
-FLEX     := flex
-BISON    := bison
 
-SRC_DIR   := src
-BUILD_DIR := build
-LEX_FILE  := $(SRC_DIR)/lexer.l
-PARSER_FILE := $(SRC_DIR)/parser.y
-LEX_GEN   := $(BUILD_DIR)/lex.yy.cpp
-PARSER_GEN := $(BUILD_DIR)/parser.tab.cpp
-PARSER_HDR := $(BUILD_DIR)/parser.tab.h
-TARGET    := minerva
+CXX       ?= g++
+CXXFLAGS  ?= -Wall -Wno-unused-function -std=c++17 -Isrc -Ibuild
+FLEX      ?= flex
+BISON     ?= bison
 
-.PHONY: all clean run conflicts summ_conflicts
+TARGET      := minerva
+BUILD_DIR   := build
+BUILD_STAMP := $(BUILD_DIR)/.dir-stamp
+LEX_FILE    := src/lexer.l
+PARSER_FILE := src/parser.y
+LEX_GEN     := $(BUILD_DIR)/lex.yy.cpp
+PARSER_GEN  := $(BUILD_DIR)/parser.tab.cpp
+PARSER_HDR  := $(BUILD_DIR)/parser.tab.h
 
+CORE_SRC := src/ast.cpp src/types.cpp src/semantic.cpp src/ir.cpp \
+            src/ir_generator.cpp src/main.cpp
+CORE_HDR := src/ast.h src/types.h src/semantic.h src/frontend.h \
+            src/diagnostic.h src/ir.h src/ir_generator.h
+
+.PHONY: all clean regen
+
+# Default command: build the compiler only.
 all: $(TARGET)
 
-build: $(TARGET)
-
-$(BUILD_DIR):
+$(BUILD_STAMP):
 	mkdir -p $(BUILD_DIR)
+	touch $@
 
-$(PARSER_GEN): $(PARSER_FILE)
-	mkdir -p $(BUILD_DIR)
+$(PARSER_GEN) $(PARSER_HDR) &: $(PARSER_FILE) | $(BUILD_STAMP)
+	@command -v $(BISON) >/dev/null 2>&1 || { echo "Error: Bison is required. Install with: sudo apt install bison" >&2; exit 1; }
 	$(BISON) -d --defines=$(PARSER_HDR) -o $(PARSER_GEN) $(PARSER_FILE)
 
-$(PARSER_HDR): $(PARSER_GEN)
+$(LEX_GEN): $(LEX_FILE) $(PARSER_HDR) | $(BUILD_STAMP)
+	@command -v $(FLEX) >/dev/null 2>&1 || { echo "Error: Flex is required. Install with: sudo apt install flex" >&2; exit 1; }
+	$(FLEX) -o $@ $(LEX_FILE)
 
-$(LEX_GEN): $(LEX_FILE) $(PARSER_HDR)
-	$(FLEX) -o $(LEX_GEN) $(LEX_FILE)
+$(TARGET): $(LEX_GEN) $(PARSER_GEN) $(PARSER_HDR) $(CORE_SRC) $(CORE_HDR)
+	$(CXX) $(CXXFLAGS) $(LEX_GEN) $(PARSER_GEN) $(CORE_SRC) -o $@
 
-$(TARGET): $(LEX_GEN) $(PARSER_GEN)
-	$(CXX) $(CXXFLAGS) $(LEX_GEN) $(PARSER_GEN) -o $(TARGET) -lfl
-
+# Remove compiler and generated output.
 clean:
+	rm -f $(TARGET) minerva_asan
+	rm -rf $(BUILD_DIR) ir typed_ast generated
+
+# Regenerate lexer and parser, then build the compiler.
+regen:
 	rm -rf $(BUILD_DIR) $(TARGET)
-
-run: $(TARGET)
-	./$(TARGET) $(FILE)
-
-conflicts:
-	mkdir -p $(BUILD_DIR)
-	$(BISON) -d --defines=$(BUILD_DIR)/parser.conflicts.h -o $(BUILD_DIR)/parser.conflicts.cpp $(PARSER_FILE) -Wcounterexamples --report=solved
-
-summ_conflicts: 
-	python3 scripts/summarize_conflicts.py
+	$(MAKE) $(TARGET)

@@ -1,0 +1,6 @@
+int main() {
+    int value = 7;
+    int *p = &value;
+    *p = *p + 2;
+    return *p;
+}

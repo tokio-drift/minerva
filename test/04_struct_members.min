@@ -1,0 +1,18 @@
+struct Point {
+    int x;
+    int y;
+};
+class Base { public: int baseValue; };
+class Derived : public Base { public: int ownValue; };
+
+int main() {
+    struct Point p;
+    p.x = 7;
+    p.y = p.x + 3;
+    struct Point *q = &p;
+    q->x = p.y;
+    Derived derived;
+    derived.baseValue = q->x;
+    derived.ownValue = derived.baseValue + 1;
+    return derived.ownValue;
+}

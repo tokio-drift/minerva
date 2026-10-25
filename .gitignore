@@ -67,6 +67,10 @@ vcpkg_installed/
 Testing/
 .cache/
 
+# compiler binaries
+/minerva
+/minerva_asan
+
 # local-only planning docs
 SCOPE.md
 WORK.md

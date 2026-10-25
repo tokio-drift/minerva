@@ -1,0 +1,8 @@
+struct Pair { int first; int second; };
+int main() {
+    struct Pair p;
+    struct Pair *q = &p;
+    p.first = 10;
+    q->second = 20;
+    return p.first + q->second;
+}

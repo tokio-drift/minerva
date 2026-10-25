@@ -1,0 +1,9 @@
+int main() {
+    int values[5];
+    int filled[3] = {1, 2, 3};
+    int sized[] = {4, 5, 6, 7};
+    int first = filled[0];
+    values[0] = 9;
+    int total = values[2] + first + sized[3];
+    return total;
+}
