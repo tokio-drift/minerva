@@ -7,6 +7,13 @@
 #include "diagnostic.h"
 #include "types.h"
 
+struct HistoryTarget {
+    const Node *declaration = nullptr;
+    std::string name;
+    TypeRef type;
+    bool persistent = false;
+};
+
 class Analyzer {
 public:
     void analyze(const Program &program);
@@ -30,7 +37,11 @@ public:
     TypeRef lambdaType(const Unsupported *lambda) const;
     std::string lambdaName(const Unsupported *lambda) const;
     long long sizeOfType(const TypeRef &type) const;
+    const std::vector<AggregateLayout> &layouts() const { return layouts_; }
     bool enumConstant(const std::string &name, long long *value) const;
+    bool constantInteger(const Node *node, long long *value) const;
+    bool constantScalar(const Node *node, TypeRef type, std::string *text) const;
+    const HistoryTarget *historyTarget(const Unsupported *node) const;
 
 private:
     struct MemberInfo { TypeRef type; size_t index = 0; };
@@ -40,16 +51,24 @@ private:
         TypeRef type;
         bool defined = false;
         SrcLoc loc;
+        const Node *declaration = nullptr;
+        bool persistent = false;
     };
 
     void error(const SrcLoc &loc, const std::string &category, const std::string &message);
 
     void registerAggregates(const Program &program);
+    bool buildAggregate(const Unsupported &node,
+                        const std::unordered_map<std::string, const Unsupported *> &definitions);
+    bool completeFieldType(TypeRef type, const SrcLoc &loc,
+                           const std::unordered_map<std::string, const Unsupported *> &definitions);
     void registerFunctions(const Program &program);
     void checkFunction(const FuncDef &fn);
     void checkDeclaration(const VarDecl &decl);
     void checkStatement(Node *node);
     void checkUnsupported(const Unsupported &node);
+    void checkIO(const Unsupported &node);
+    void checkSwitchLabels(Node *node, TypeRef controller, std::vector<long long> &values, bool &hasDefault);
     void checkReturn(const Return &node);
     void checkCondition(Node *cond, const SrcLoc &loc);
 
@@ -67,9 +86,12 @@ private:
     TypeRef resolveType(const TypeSpec &spec, const SrcLoc &loc);
     TypeRef typeOfDecl(const VarDecl &decl, const SrcLoc &loc);
     void checkInitializer(const VarDecl &decl, const TypeRef &type);
+    void checkInitializerValue(Node *node, TypeRef type);
+    bool constantInitializer(const Node *node, TypeRef type) const;
 
     const Symbol *lookup(const std::string &name) const;
-    bool declareVariable(const std::string &name, TypeRef type, const SrcLoc &loc);
+    bool declareVariable(const std::string &name, TypeRef type, const SrcLoc &loc,
+                         const Node *declaration = nullptr, bool persistent = false);
     bool declareFunction(const std::string &name, TypeRef type, const SrcLoc &loc);
     bool declareTypeName(const std::string &name, TypeRef type, const SrcLoc &loc);
 
@@ -81,8 +103,12 @@ private:
     std::unordered_map<const FuncDef *, TypeRef> functionTypes_;
     std::unordered_map<const VarDecl *, TypeRef> declTypes_;
     std::unordered_map<const Node *, ExprInfo> exprTypes_;
+    std::unordered_map<const Node *, long long> sizeofValues_;
+    std::unordered_map<const Unsupported *, HistoryTarget> historyTargets_;
     std::unordered_map<std::string, std::unordered_map<std::string, MemberInfo>> aggregateMembers_;
     std::unordered_map<std::string, bool> aggregateIsUnion_;
+    std::vector<AggregateLayout> layouts_;
+    std::unordered_map<std::string, int> layoutState_;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> aggregateAccess_;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> aggregateMemberOwner_;
     std::unordered_map<std::string, std::unordered_map<std::string, const FuncDef *>> aggregateMethods_;
