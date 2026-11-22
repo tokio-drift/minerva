@@ -6,7 +6,8 @@
 #include "types.h"
 
 enum class IROp {
-    Const, Decl, Global, Copy, Conv, Binary, Unary, Compare, Call, Return, Label, Jump, Branch, Address, Load, Store, ElementAddress
+    Const, Decl, Global, Copy, Conv, Binary, Unary, Compare, Call, Return, Label, Jump, Branch, Address, Load, Store, ElementAddress,
+    ByteAddress, Data, Switch
 };
 
 // An operand names a value: a temporary, a variable, a literal or a function.
@@ -24,6 +25,11 @@ struct IROperand {
     std::string str() const;   // spelling used in the textual form
 };
 
+struct IRCase {
+    long long value = 0;
+    std::string label;
+};
+
 struct IRInstruction {
     IROp op = IROp::Copy;
     IROperand dest;                  // destination, absent for calls without a result
@@ -31,6 +37,7 @@ struct IRInstruction {
     std::string mnemonic;            // add, sub, eq, neg, ...
     std::vector<IROperand> args;     // operands, the callee is args[0] of a call
     std::string label;               // label name for Label, Jump and Branch
+    std::vector<IRCase> cases;
 };
 
 struct IRFunction {
@@ -41,6 +48,7 @@ struct IRFunction {
 };
 
 struct IRModule {
+    std::vector<AggregateLayout> layouts;
     std::vector<IRInstruction> globals;    // module level declarations
     std::vector<IRFunction> functions;
 };
@@ -53,3 +61,4 @@ bool parseIR(const std::string &text, IRModule *module, std::vector<std::string>
 
 // Structural checks: function boundaries, instruction arity, temporaries, variables and labels.
 bool verifyIR(const IRModule &module, std::vector<std::string> *errors);
+bool optimizeIR(IRModule *module, std::vector<std::string> *errors);

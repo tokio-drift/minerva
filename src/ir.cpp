@@ -42,6 +42,7 @@ std::vector<std::string> splitOn(const std::string &s, char sep) {
     std::vector<std::string> parts;
     std::string current;
     bool inString = false, escaped = false;
+    int depth = 0;
     for (char c : s) {
         if (inString) {
             current += c;
@@ -50,7 +51,11 @@ std::vector<std::string> splitOn(const std::string &s, char sep) {
             else if (c == '"') inString = false;
         } else if (c == '"') {
             inString = true; current += c;
-        } else if (c == sep) {
+        } else if (c == '(' || c == '[') {
+            ++depth; current += c;
+        } else if (c == ')' || c == ']') {
+            --depth; current += c;
+        } else if (c == sep && depth == 0) {
             parts.push_back(current); current.clear();
         } else current += c;
     }
@@ -68,69 +73,47 @@ TypeRef typeFromName(const std::string &name) {
     return makeAggregate(name);
 }
 
-// Reads one type, for example int, char*, int[4], Point or int (int, char).
+// Read postfix type constructors in the same order used by Type::str.
 bool parseType(const std::string &s, size_t *pos, TypeRef *out) {
     size_t i = *pos;
-    while (i < s.size() && isspace(static_cast<unsigned char>(s[i]))) i++;
-    size_t nameStart = i;
+    while (i < s.size() && isspace(static_cast<unsigned char>(s[i]))) ++i;
     std::string name = readIdentifier(s, &i);
-    if (name.empty()) {
-        *pos = nameStart;
-        return false;
-    }
+    if (name.empty()) return false;
     TypeRef type = typeFromName(name);
-    size_t afterName = i;
-    while (i < s.size() && isspace(static_cast<unsigned char>(s[i]))) i++;
-
-    if (i < s.size() && s[i] == '(') {
-        i++;
-        std::vector<TypeRef> params;
-        while (true) {
-            while (i < s.size() && isspace(static_cast<unsigned char>(s[i]))) i++;
-            if (i < s.size() && s[i] == ')') {
-                i++;
-                break;
-            }
-            TypeRef param;
-            if (!parseType(s, &i, &param)) return false;
-            params.push_back(param);
-            while (i < s.size() && isspace(static_cast<unsigned char>(s[i]))) i++;
-            if (i < s.size() && s[i] == ',') {
-                i++;
-                continue;
-            }
-            if (i < s.size() && s[i] == ')') {
-                i++;
-                break;
-            }
-            return false;
-        }
-        type = makeFunction(type, params);
-    } else {
-        i = afterName;
-    }
-
     while (i < s.size()) {
-        if (s[i] == '*') {
-            type = makePointer(type);
-            i++;
-        } else if (s[i] == '&') {
-            type = makeReference(type);
-            i++;
+        size_t beforeSpace = i;
+        while (i < s.size() && isspace(static_cast<unsigned char>(s[i]))) ++i;
+        if (i == s.size()) break;
+        if (i > beforeSpace && (s[i] == '*' || s[i] == '&' || s[i] == '[')) break;
+        if (s[i] == '*' || s[i] == '&') {
+            type = s[i++] == '*' ? makePointer(type) : makeReference(type);
         } else if (s[i] == '[') {
             std::vector<long long> dims;
             while (i < s.size() && s[i] == '[') {
-                i++;
-                std::string number;
-                while (i < s.size() && isdigit(static_cast<unsigned char>(s[i]))) number += s[i++];
-                if (i >= s.size() || s[i] != ']') return false;
-                i++;
-                dims.push_back(number.empty() ? -1 : std::stoll(number));
+                size_t begin = ++i;
+                while (i < s.size() && isdigit(static_cast<unsigned char>(s[i]))) ++i;
+                if (i == s.size() || s[i] != ']') return false;
+                try { dims.push_back(i == begin ? -1 : std::stoll(s.substr(begin, i - begin))); }
+                catch (...) { return false; }
+                ++i;
             }
             type = makeArray(type, dims);
-        } else {
-            break;
-        }
+        } else if (s[i] == '(') {
+            ++i;
+            std::vector<TypeRef> params;
+            while (i < s.size() && isspace(static_cast<unsigned char>(s[i]))) ++i;
+            if (i < s.size() && s[i] != ')') {
+                while (true) {
+                    TypeRef param;
+                    if (!parseType(s, &i, &param)) return false;
+                    params.push_back(param);
+                    if (i == s.size() || s[i] != ',') break;
+                    ++i;
+                }
+            }
+            if (i == s.size() || s[i++] != ')') return false;
+            type = makeFunction(type, params);
+        } else break;
     }
     *pos = i;
     *out = type;
@@ -189,8 +172,21 @@ bool inList(const char *const *names, size_t count, const std::string &s) {
     return false;
 }
 
+// Keep each instruction on one readable IR line.
 std::string instructionText(const IRInstruction &ins) {
     switch (ins.op) {
+    case IROp::Data:
+        return "data " + ins.type->str() + " " + ins.args[0].str() + " + " +
+               ins.args[1].str() + " = " + ins.args[2].str();
+    case IROp::Switch: {
+        std::string text = "switch " + ins.type->str() + " " + ins.args[0].str() + ", default " + ins.label;
+        auto cases = ins.cases;
+        std::sort(cases.begin(), cases.end(), [](const IRCase &a, const IRCase &b) { return a.value < b.value; });
+        for (const auto &entry : cases) text += ", " + std::to_string(entry.value) + ":" + entry.label;
+        return text;
+    }
+    case IROp::ByteAddress:
+        return ins.dest.str() + " = byteaddr " + ins.type->str() + " " + ins.args[0].str() + ", " + ins.args[1].str();
     case IROp::Const:
         return ins.dest.str() + " = const " + (ins.type ? ins.type->str() : "?") + " " +
                (ins.args.empty() ? "" : ins.args[0].str());
@@ -300,13 +296,32 @@ std::string IROperand::str() const {
     return "";
 }
 
+// Write layout and storage metadata in a stable order.
 std::string serializeIR(const IRModule &module) {
     std::ostringstream os;
     os << "; Minerva intermediate representation\n";
     os << "; generated by minerva, do not edit\n";
-    for (const IRInstruction &ins : module.globals) {
-        os << instructionText(ins) << "\n";
+    auto layouts = module.layouts;
+    std::sort(layouts.begin(), layouts.end(), [](const AggregateLayout &a, const AggregateLayout &b) { return a.name < b.name; });
+    for (const auto &layout : layouts) {
+        os << "layout " << (layout.isUnion ? "union " : "struct ") << layout.name
+           << " size " << layout.size << " align " << layout.alignment << "\n";
+        for (const auto &field : layout.fields)
+            os << "  field " << field.type->str() << " " << field.name << " offset " << field.offset << "\n";
+        os << "endlayout\n";
     }
+    std::unordered_map<std::string, size_t> order;
+    for (const auto &ins : module.globals)
+        if (ins.op == IROp::Global) order.emplace(ins.dest.name, order.size());
+    auto globals = module.globals;
+    std::stable_sort(globals.begin(), globals.end(), [&](const IRInstruction &a, const IRInstruction &b) {
+        std::string an = a.op == IROp::Data ? a.args[0].name : a.dest.name;
+        std::string bn = b.op == IROp::Data ? b.args[0].name : b.dest.name;
+        if (order[an] != order[bn]) return order[an] < order[bn];
+        if (a.op != b.op) return a.op == IROp::Global;
+        return a.op == IROp::Data && std::stoll(a.args[1].text) < std::stoll(b.args[1].text);
+    });
+    for (const auto &ins : globals) os << instructionText(ins) << "\n";
     for (const IRFunction &fn : module.functions) {
         os << "\nfunc " << fn.name << "(";
         for (size_t i = 0; i < fn.params.size(); i++) {
@@ -324,6 +339,7 @@ std::string serializeIR(const IRModule &module) {
 
 namespace {
 
+// Parse one typed instruction from a function body.
 bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<std::string> *errors,
                       int lineNo) {
     std::string t = trim(text);
@@ -363,6 +379,29 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
     std::string mnemonic = space == std::string::npos ? rest : rest.substr(0, space);
     std::string tail = space == std::string::npos ? "" : trim(rest.substr(space));
 
+    if (mnemonic == "switch") {
+        if (hasDest) return fail("switch cannot have a destination");
+        size_t pos = 0;
+        if (!parseType(tail, &pos, &ins->type)) return fail("switch needs an integer type");
+        auto parts = splitOn(tail.substr(pos), ',');
+        if (parts.size() < 2 || !parseOperand(parts[0], &dest)) return fail("malformed switch");
+        ins->op = IROp::Switch;
+        ins->args = {dest};
+        std::string target = trim(parts[1]);
+        if (target.rfind("default ", 0) != 0) return fail("switch needs a default target");
+        ins->label = trim(target.substr(8));
+        for (size_t i = 2; i < parts.size(); ++i) {
+            size_t colon = parts[i].find(':');
+            if (colon == std::string::npos) return fail("malformed switch case");
+            std::string value = trim(parts[i].substr(0, colon));
+            size_t used = 0;
+            long long number;
+            try { number = std::stoll(value, &used); } catch (...) { return fail("malformed case value"); }
+            if (used != value.size()) return fail("malformed case value");
+            ins->cases.push_back({number, trim(parts[i].substr(colon + 1))});
+        }
+        return true;
+    }
     if (mnemonic == "ret") {
         ins->op = IROp::Return;
         if (!tail.empty()) {
@@ -423,7 +462,7 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
         return true;
     }
 
-    if (mnemonic == "addr" || mnemonic == "load" || mnemonic == "elemaddr" || mnemonic == "store") {
+    if (mnemonic == "addr" || mnemonic == "load" || mnemonic == "elemaddr" || mnemonic == "store" || mnemonic == "byteaddr") {
         size_t sp = tail.find_first_of(" \t");
         if (sp == std::string::npos) return fail(mnemonic + " needs a type and operand(s)");
         size_t pos = 0; TypeRef type;
@@ -446,7 +485,7 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
             ins->op = IROp::Store; ins->type = type; ins->args = {a, b};
         } else {
             if (!hasDest || dest.kind != IROperand::Kind::Temp) return fail("elemaddr must write a temporary");
-            ins->op = IROp::ElementAddress; ins->type = type; ins->dest = dest; ins->dest.type = type; ins->args = {a, b};
+            ins->op = mnemonic == "byteaddr" ? IROp::ByteAddress : IROp::ElementAddress; ins->type = type; ins->dest = dest; ins->dest.type = type; ins->args = {a, b};
         }
         return true;
     }
@@ -469,7 +508,7 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
         TypeRef type;
         if (!parseType(tail, &pos, &type)) return fail("malformed type in conv");
         IROperand source;
-        if (!parseOperand(trim(tail.substr(sp)), &source)) return fail("malformed conv operand");
+        if (!parseOperand(trim(tail.substr(pos)), &source)) return fail("malformed conv operand");
         if (!hasDest || dest.kind != IROperand::Kind::Temp)
             return fail("conv does not write a temporary");
         ins->type = type;
@@ -486,7 +525,7 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
         size_t pos = 0;
         TypeRef type;
         if (!parseType(tail, &pos, &type)) return fail("malformed type in call");
-        std::string callee = trim(tail.substr(sp));
+        std::string callee = trim(tail.substr(pos));
         size_t open = callee.find('(');
         size_t close = callee.rfind(')');
         if (open == std::string::npos || close == std::string::npos || close < open)
@@ -567,6 +606,7 @@ bool parseInstruction(const std::string &text, IRInstruction *ins, std::vector<s
     return fail("unknown instruction '" + mnemonic + "'");
 }
 
+// Read a module storage declaration and optional scalar initializer.
 bool parseGlobal(const std::string &text, IRInstruction *ins, std::vector<std::string> *errors,
                  int lineNo) {
     std::string t = trim(text);
@@ -581,7 +621,7 @@ bool parseGlobal(const std::string &text, IRInstruction *ins, std::vector<std::s
         errors->push_back("line " + std::to_string(lineNo) + ": malformed type in global");
         return false;
     }
-    std::string rest = trim(t.substr(sp));
+    std::string rest = trim(t.substr(pos));
     std::string name = rest;
     std::string value;
     size_t eq = rest.find(" = ");
@@ -600,14 +640,96 @@ bool parseGlobal(const std::string &text, IRInstruction *ins, std::vector<std::s
     return true;
 }
 
+bool parseData(const std::string &text, IRInstruction *ins) {
+    size_t pos = 0;
+    if (!parseType(text, &pos, &ins->type)) return false;
+    std::istringstream in(text.substr(pos));
+    std::string name, plus, offset, equals, value;
+    if (!(in >> name >> plus >> offset >> equals) || plus != "+" || equals != "=") return false;
+    std::getline(in, value);
+    value = trim(value);
+    if (value.empty()) return false;
+    ins->op = IROp::Data;
+    ins->args = {IROperand::variable(name, nullptr), IROperand::literal(offset, makeType(TypeKind::Int)),
+                 IROperand::literal(value, ins->type)};
+    return true;
+}
+
+bool parseLayoutHeader(const std::string &text, AggregateLayout *layout) {
+    std::istringstream in(text);
+    std::string kind, size, alignment, extra;
+    if (!(in >> kind >> layout->name >> size >> layout->size >> alignment >> layout->alignment)) return false;
+    layout->isUnion = kind == "union";
+    return (kind == "struct" || kind == "union") && size == "size" && alignment == "align" && !(in >> extra);
+}
+
+bool parseLayoutField(const std::string &text, FieldLayout *field) {
+    size_t pos = 0;
+    if (!parseType(text, &pos, &field->type)) return false;
+    std::istringstream in(text.substr(pos));
+    std::string offset, extra;
+    return (in >> field->name >> offset >> field->offset) && offset == "offset" && !(in >> extra);
+}
+
+TypeRef literalType(const IROperand &operand, TypeRef context) {
+    if (operand.type) return operand.type;
+    if (!operand.text.empty() && operand.text[0] == '"') return makePointer(makeType(TypeKind::Char));
+    if (!operand.text.empty() && operand.text[0] == '\'') return makeType(TypeKind::Char);
+    return context ? context : makeType(TypeKind::Int);
+}
+
+// Recover types omitted from operand spellings before handing IR to later stages.
+void restoreIRTypes(IRModule *module) {
+    std::unordered_map<std::string, TypeRef> globals, functions;
+    for (const auto &ins : module->globals)
+        if (ins.op == IROp::Global) globals[ins.dest.name] = ins.type;
+    for (const auto &fn : module->functions) {
+        std::vector<TypeRef> params;
+        for (const auto &param : fn.params) params.push_back(param.type);
+        functions[fn.name] = makePointer(makeFunction(fn.returnType, params));
+    }
+    for (auto &fn : module->functions) {
+        auto variables = globals;
+        std::unordered_map<std::string, TypeRef> temps;
+        for (const auto &param : fn.params) variables[param.name] = param.type;
+        for (auto &ins : fn.body) {
+            for (size_t i = 0; i < ins.args.size(); ++i) {
+                if (ins.op == IROp::Branch && i > 0) continue;
+                auto &arg = ins.args[i];
+                if (arg.kind == IROperand::Kind::Temp && temps.count(arg.name)) arg.type = temps[arg.name];
+                if (arg.kind == IROperand::Kind::Variable && variables.count(arg.name)) arg.type = variables[arg.name];
+                if (arg.kind == IROperand::Kind::Function && functions.count(arg.name)) arg.type = functions[arg.name];
+                if (arg.kind == IROperand::Kind::Literal) {
+                    TypeRef context = (ins.op == IROp::ElementAddress || ins.op == IROp::ByteAddress) && i == 1
+                        ? makeType(TypeKind::Int) : ins.type;
+                    arg.type = literalType(arg, context);
+                }
+            }
+            if (ins.op == IROp::Decl) variables[ins.dest.name] = ins.type;
+            if (ins.op == IROp::Copy && !ins.args.empty()) ins.type = ins.args[0].type;
+            if (ins.op == IROp::Compare || (ins.op == IROp::Unary && ins.mnemonic == "not"))
+                ins.type = makeType(TypeKind::Int);
+            if (ins.dest.kind == IROperand::Kind::Temp) {
+                ins.dest.type = ins.type;
+                temps[ins.dest.name] = ins.type;
+            } else if (ins.dest.kind == IROperand::Kind::Variable && variables.count(ins.dest.name))
+                ins.dest.type = variables[ins.dest.name];
+        }
+    }
+    for (auto &ins : module->globals)
+        if (ins.op == IROp::Data && globals.count(ins.args[0].name)) ins.args[0].type = globals[ins.args[0].name];
+}
+
 }  // namespace
 
+// Parse module records before restoring omitted operand types.
 bool parseIR(const std::string &text, IRModule *module, std::vector<std::string> *errors) {
-    module->functions.clear();
+    *module = IRModule{};
     std::istringstream in(text);
     std::string line;
     int lineNo = 0;
     std::unique_ptr<IRFunction> current;
+    std::unique_ptr<AggregateLayout> layout;
 
     auto fail = [&](const std::string &message) {
         errors->push_back("line " + std::to_string(lineNo) + ": " + message);
@@ -619,6 +741,30 @@ bool parseIR(const std::string &text, IRModule *module, std::vector<std::string>
         std::string t = trim(line);
         if (t.empty() || t[0] == ';') continue;
 
+        if (layout) {
+            if (t == "endlayout") {
+                module->layouts.push_back(*layout);
+                layout.reset();
+            } else {
+                FieldLayout field;
+                if (t.rfind("field ", 0) != 0 || !parseLayoutField(t.substr(6), &field)) return fail("malformed layout field");
+                layout->fields.push_back(field);
+            }
+            continue;
+        }
+        if (t.rfind("layout ", 0) == 0) {
+            if (current) return fail("layout inside a function");
+            layout.reset(new AggregateLayout());
+            if (!parseLayoutHeader(t.substr(7), layout.get())) return fail("malformed layout header");
+            continue;
+        }
+        if (t.rfind("data ", 0) == 0) {
+            if (current) return fail("data initializer inside a function");
+            IRInstruction ins;
+            if (!parseData(t.substr(5), &ins)) return fail("malformed data initializer");
+            module->globals.push_back(ins);
+            continue;
+        }
         if (t == "}") {
             if (!current) return fail("closing brace without a function");
             module->functions.push_back(std::move(*current));
@@ -627,6 +773,7 @@ bool parseIR(const std::string &text, IRModule *module, std::vector<std::string>
         }
 
         if (t.rfind("global ", 0) == 0 && t.rfind("global = ", 0) != 0) {
+            if (current) return fail("global declaration inside a function");
             IRInstruction ins;
             if (!parseGlobal(t.substr(7), &ins, errors, lineNo)) return false;
             module->globals.push_back(ins);
@@ -667,6 +814,7 @@ bool parseIR(const std::string &text, IRModule *module, std::vector<std::string>
         current->body.push_back(ins);
     }
 
+    if (layout) return fail("layout is not closed");
     if (current) {
         errors->push_back("function '" + current->name + "' is not closed");
         return false;
@@ -675,11 +823,145 @@ bool parseIR(const std::string &text, IRModule *module, std::vector<std::string>
         errors->push_back("the module contains no function");
         return false;
     }
+    restoreIRTypes(module);
     return true;
 }
 
-bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
+namespace {
+
+bool decimalValue(const std::string &text, long long *value) {
+    size_t used = 0;
+    try { *value = std::stoll(text, &used); } catch (...) { return false; }
+    return used == text.size();
+}
+
+bool hasReference(TypeRef type) {
+    if (!type) return false;
+    if (type->kind == TypeKind::Reference || hasReference(type->sub) || hasReference(type->ret)) return true;
+    for (const auto &param : type->params) if (hasReference(param)) return true;
+    return false;
+}
+
+bool layoutAcyclic(const std::vector<AggregateLayout> &layouts, const std::string &name,
+                   std::vector<std::string> &active) {
+    if (std::find(active.begin(), active.end(), name) != active.end()) return false;
+    const auto *layout = findLayout(layouts, name);
+    if (!layout) return false;
+    active.push_back(name);
+    for (const auto &field : layout->fields) {
+        TypeRef type = field.type;
+        while (type && type->isArray()) type = type->sub;
+        if (type && type->kind == TypeKind::Aggregate && !layoutAcyclic(layouts, type->name, active)) return false;
+    }
+    active.pop_back();
+    return true;
+}
+
+// Validate exported layouts without semantic analyzer state.
+bool verifyLayouts(const IRModule &module, std::vector<std::string> *errors) {
     bool ok = true;
+    std::unordered_set<std::string> names;
+    for (const auto &layout : module.layouts) {
+        auto fail = [&](const std::string &message) { errors->push_back("layout '" + layout.name + "': " + message); ok = false; };
+        if (layout.name.empty() || !names.insert(layout.name).second) fail("duplicate or empty name");
+        if ((layout.alignment != 1 && layout.alignment != 2 && layout.alignment != 4) ||
+            layout.size <= 0 || layout.size > 2147483647 || layout.size % layout.alignment != 0) {
+            fail("invalid size or alignment");
+            continue;
+        }
+        std::vector<std::string> active;
+        if (!layoutAcyclic(module.layouts, layout.name, active)) fail("recursive or incomplete by-value layout");
+        long long end = 0, maximumEnd = 0, maximumAlignment = 1;
+        std::unordered_set<std::string> fields;
+        for (const auto &field : layout.fields) {
+            if (hasReference(field.type)) fail("reference types must be lowered to pointers");
+            long long size = targetSize(field.type, module.layouts);
+            long long alignment = targetAlignment(field.type, module.layouts);
+            if (field.name.empty() || !fields.insert(field.name).second) fail("duplicate or empty field name");
+            if (size <= 0 || field.offset < 0 || field.offset > layout.size - size ||
+                alignment <= 0 || alignment > layout.alignment || field.offset % alignment != 0)
+                fail("invalid size, type or offset for field '" + field.name + "'");
+            if ((layout.isUnion && field.offset != 0) || (!layout.isUnion && field.offset < end))
+                fail("overlapping or out-of-order field '" + field.name + "'");
+            if (!layout.isUnion) end = field.offset + size;
+            maximumEnd = std::max(maximumEnd, field.offset + size);
+            maximumAlignment = std::max(maximumAlignment, alignment);
+        }
+        if (layout.alignment != maximumAlignment || layout.size != alignTo(std::max(1LL, maximumEnd), layout.alignment))
+            fail("size or alignment does not match the fields");
+    }
+    return ok;
+}
+
+bool leafMatches(TypeRef object, long long offset, TypeRef leaf, const std::vector<AggregateLayout> &layouts, size_t depth = 0) {
+    if (!object || offset < 0 || depth > layouts.size()) return false;
+    if (object->isArray()) {
+        TypeRef child = object->sub;
+        if (object->dims.size() > 1)
+            child = makeArray(child, std::vector<long long>(object->dims.begin() + 1, object->dims.end()));
+        long long stride = targetSize(child, layouts);
+        return stride > 0 && offset < targetSize(object, layouts) && leafMatches(child, offset % stride, leaf, layouts, depth);
+    }
+    if (object->kind == TypeKind::Aggregate) {
+        const auto *layout = findLayout(layouts, object->name);
+        if (!layout) return false;
+        for (const auto &field : layout->fields)
+            if (leafMatches(field.type, offset - field.offset, leaf, layouts, depth + 1)) return true;
+        return false;
+    }
+    return offset == 0 && sameType(object, leaf);
+}
+
+bool validDataLiteral(const IROperand &value, TypeRef type) {
+    if (value.kind != IROperand::Kind::Literal || !type) return false;
+    size_t used = 0;
+    try {
+        if (type->kind == TypeKind::Float) std::stof(value.text, &used);
+        else if (type->isInteger() || type->isPointer()) {
+            if (value.text.size() >= 3 && value.text.front() == '\'' && value.text.back() == '\'')
+                return decodeLiteralBytes(value.text).size() == 1;
+            long long integer;
+            return integerLiteralValue(value.text, &integer);
+        } else return false;
+    } catch (...) { return false; }
+    return used == value.text.size();
+}
+
+// Data records describe nonoverlapping scalar leaves inside zero-filled globals.
+bool verifyData(const IRModule &module, const std::unordered_map<std::string, TypeRef> &globals,
+                std::vector<std::string> *errors) {
+    bool ok = true;
+    std::unordered_map<std::string, std::vector<std::pair<long long, long long>>> occupied;
+    for (const auto &ins : module.globals)
+        if (ins.op == IROp::Global && !ins.args.empty())
+            occupied[ins.dest.name].push_back({0, targetSize(ins.type, module.layouts)});
+    for (const auto &ins : module.globals) {
+        if (ins.op != IROp::Data) continue;
+        auto fail = [&](const std::string &message) { errors->push_back("data initializer: " + message); ok = false; };
+        if (ins.args.size() != 3 || ins.args[0].kind != IROperand::Kind::Variable ||
+            ins.args[1].kind != IROperand::Kind::Literal || !ins.type) {
+            fail("malformed operands or leaf type"); continue;
+        }
+        auto global = globals.find(ins.args[0].name);
+        long long offset = -1, size = targetSize(ins.type, module.layouts);
+        if (global == globals.end() || !decimalValue(ins.args[1].text, &offset) || size <= 0 || offset < 0 ||
+            offset > targetSize(global->second, module.layouts) - size ||
+            !leafMatches(global->second, offset, ins.type, module.layouts) || !validDataLiteral(ins.args[2], ins.type)) {
+            fail("invalid global, offset, leaf type or literal"); continue;
+        }
+        auto &ranges = occupied[global->first];
+        for (const auto &range : ranges)
+            if (offset < range.second && offset + size > range.first) fail("overlapping initialization of '" + global->first + "'");
+        ranges.push_back({offset, offset + size});
+    }
+    return ok;
+}
+
+}  // namespace
+
+// Check module storage, signatures and instruction uses.
+bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
+    bool ok = verifyLayouts(module, errors);
     std::unordered_set<std::string> functionNames;
     std::unordered_map<std::string, TypeRef> globals;
 
@@ -689,11 +971,14 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
     };
 
     for (const IRInstruction &ins : module.globals) {
+        if (ins.op == IROp::Data) continue;
         if (ins.op != IROp::Global) {
             fail("unexpected instruction in the global section");
             continue;
         }
         if (!ins.type) fail("global '" + ins.dest.name + "' has no type");
+        if (hasReference(ins.type)) fail("IR reference types must be lowered to pointers");
+        if (targetSize(ins.type, module.layouts) <= 0) fail("global requires a complete object type");
         if (ins.dest.name.empty()) fail("global without a name");
         if (!globals.emplace(ins.dest.name, ins.type).second)
             fail("global '" + ins.dest.name + "' is declared twice");
@@ -703,11 +988,13 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
             fail("global '" + ins.dest.name + "' is not initialized with a literal");
     }
 
+    if (!verifyData(module, globals, errors)) ok = false;
+
     // The signatures are collected first, a call may target a function defined later.
     std::unordered_map<std::string, size_t> arities;
     for (const IRFunction &fn : module.functions) arities.emplace(fn.name, fn.params.size());
     const std::unordered_set<std::string> runtimeFunctions = {
-        "printf", "scanf", "malloc", "free", "__minerva_snapshot", "__minerva_rewind"
+        "printf", "scanf", "malloc", "free", "__minerva_snapshot", "__minerva_rewind", "__minerva_history_clear"
     };
 
     for (const IRFunction &fn : module.functions) {
@@ -715,6 +1002,7 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
         if (!functionNames.insert(fn.name).second)
             fail("function '" + fn.name + "' is defined twice");
         if (!fn.returnType) fail("function '" + fn.name + "' has no return type");
+        if (hasReference(fn.returnType)) fail("IR reference types must be lowered to pointers");
 
         std::unordered_set<std::string> labels;
         for (const IRInstruction &ins : fn.body) {
@@ -725,6 +1013,7 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
         std::unordered_map<std::string, TypeRef> temps;
         std::unordered_map<std::string, TypeRef> variables;
         for (const IROperand &p : fn.params) {
+            if (hasReference(p.type)) fail("IR reference types must be lowered to pointers");
             if (p.name.empty()) fail("function '" + fn.name + "' has a parameter without a name");
             if (!variables.emplace(p.name, p.type).second)
                 fail("parameter '" + p.name + "' is declared twice in '" + fn.name + "'");
@@ -771,11 +1060,14 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
         };
 
         for (const IRInstruction &ins : fn.body) {
+            if (hasReference(ins.type)) fail("IR reference types must be lowered to pointers");
             switch (ins.op) {
+            case IROp::Data:
             case IROp::Global:
                 fail("function '" + fn.name + "' contains a global declaration");
                 break;
             case IROp::Decl: {
+                if (targetSize(ins.type, module.layouts) <= 0) fail("decl requires a complete object type");
                 if (!ins.type) {
                     fail("decl in '" + fn.name + "' has no type");
                     break;
@@ -921,6 +1213,38 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
                 if (!temps.emplace(ins.dest.name, ins.type).second) fail("temporary " + ins.dest.name + " is defined twice in '" + fn.name + "'");
                 break;
             }
+            case IROp::Switch: {
+                bool defined = false;
+                TypeRef type;
+                if (ins.args.size() == 1) operandDefined(ins.args[0], defined, &type);
+                if (!defined || !type || !type->isInteger() || !sameType(type, ins.type))
+                    fail("switch in '" + fn.name + "' needs one integer controller");
+                if (!labels.count(ins.label)) fail("switch has an undefined default label '" + ins.label + "'");
+                std::unordered_set<long long> values;
+                for (const auto &entry : ins.cases) {
+                    if (!values.insert(entry.value).second) fail("switch has a duplicate case value");
+                    if (!labels.count(entry.label)) fail("switch has an undefined case label '" + entry.label + "'");
+                    bool valid = ins.type && ins.type->kind == TypeKind::Unsigned
+                        ? entry.value >= 0 && entry.value <= 4294967295LL
+                        : entry.value >= -2147483648LL && entry.value <= 2147483647LL;
+                    if (!valid) fail("switch case value is outside the controller range");
+                }
+                break;
+            }
+            case IROp::ByteAddress: {
+                bool baseDefined = false, offsetDefined = false;
+                TypeRef base, offset;
+                if (ins.args.size() == 2) {
+                    operandDefined(ins.args[0], baseDefined, &base);
+                    operandDefined(ins.args[1], offsetDefined, &offset);
+                }
+                if (!baseDefined || !offsetDefined || !base || !base->isPointer() ||
+                    !offset || !offset->isInteger() || !ins.type || !ins.type->isPointer() ||
+                    ins.dest.kind != IROperand::Kind::Temp)
+                    fail("byteaddr in '" + fn.name + "' requires a pointer base and integer byte offset");
+                if (!temps.emplace(ins.dest.name, ins.type).second) fail("byteaddr temporary is defined twice");
+                break;
+            }
             case IROp::ElementAddress: {
                 if (ins.dest.kind != IROperand::Kind::Temp || ins.args.size() != 2 || !ins.type || !ins.type->isPointer()) {
                     fail("malformed elemaddr in '" + fn.name + "'"); break;
@@ -955,9 +1279,11 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
                             fail("call in '" + fn.name + "' targets the undefined function " + callee);
                         } else {
                             const size_t argc = ins.args.size() - 1;
-                            if ((callee == "malloc" || callee == "free" || callee == "__minerva_snapshot") && argc != 1)
+                            if ((callee == "malloc" || callee == "free" || callee == "__minerva_history_clear") && argc != 1)
                                 fail("runtime call to '" + callee + "' has the wrong number of arguments");
-                            if (callee == "__minerva_rewind" && argc != 2)
+                            if (callee == "__minerva_snapshot" && argc != 3)
+                                fail("runtime call to '__minerva_snapshot' has the wrong number of arguments");
+                            if (callee == "__minerva_rewind" && argc != 4)
                                 fail("runtime call to '__minerva_rewind' has the wrong number of arguments");
                             if ((callee == "printf" || callee == "scanf") && argc < 1)
                                 fail("runtime I/O call requires a format string");
