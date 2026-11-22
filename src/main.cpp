@@ -47,7 +47,7 @@ static void usage(const char *prog, std::ostream &out) {
         << "Default: --lex; with -o and no stage: --ir. Output defaults to stdout.\n"
         << "Output: -o path, -opath, or -o - for stdout, for any compilation stage.\n"
         << "Optimization: -O0 (default), -O1 for IR/MIPS; local integer folding and temporary propagation.\n"
-        << "MIPS backend is unavailable until phase 7.\n"
+        << "MIPS target: SPIM; output includes the required runtime helpers.\n"
         << "Exits: 0 success, 1 usage/file, 2 lex/syntax, 3 semantic, 4 IR, 5 backend.\n";
 }
 
@@ -354,8 +354,15 @@ static int renderAnalyzedStage(const Options &options, std::ostream &out) {
     int status = buildVerifiedIR(options.input, analyzer, &module, options.optimization);
     if (status != 0) return status;
     if (options.stage == Stage::MIPS) {
-        std::cerr << options.input << ": error[backend-unavailable]: MIPS backend is not implemented yet\n";
-        return 5;
+        std::string assembly;
+        std::vector<std::string> errors;
+        if (!generateMIPS(module, &assembly, &errors)) {
+            for (const auto &error : errors)
+                std::cerr << options.input << ": error[backend-error]: " << error << "\n";
+            return 5;
+        }
+        out << assembly;
+        return 0;
     }
     out << serializeIR(module);
     return 0;
