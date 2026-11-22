@@ -41,6 +41,30 @@ struct Type {
     std::string str() const;
 };
 
+struct FieldLayout {
+    std::string name;
+    TypeRef type;
+    long long offset = 0;
+};
+
+struct AggregateLayout {
+    std::string name;
+    bool isUnion = false;
+    long long size = 0;
+    long long alignment = 1;
+    std::vector<FieldLayout> fields;
+};
+
+long long alignTo(long long value, long long alignment);
+long long targetSize(TypeRef type, const std::vector<AggregateLayout> &layouts);
+long long targetAlignment(TypeRef type, const std::vector<AggregateLayout> &layouts);
+const AggregateLayout *findLayout(const std::vector<AggregateLayout> &layouts, const std::string &name);
+bool integerLiteralValue(const std::string &text, long long *value);
+std::vector<unsigned char> decodeLiteralBytes(const std::string &text);
+TypeRef arrayElementType(TypeRef type);
+long long initializerCount(TypeRef type, const std::vector<AggregateLayout> &layouts);
+FieldLayout initializerElement(TypeRef type, long long index, const std::vector<AggregateLayout> &layouts);
+
 TypeRef makeType(TypeKind kind);
 TypeRef makeUnknown();
 TypeRef makePointer(TypeRef to);
@@ -67,3 +91,6 @@ TypeRef usualArithmetic(TypeRef a, TypeRef b);
 bool sameType(const TypeRef &a, TypeRef b);
 bool assignable(const TypeRef &dst, const TypeRef &src);
 TypeRef callableType(const TypeRef &t);
+TypeRef referencedType(TypeRef type);
+bool bindableReference(TypeRef reference, const ExprInfo &value);
+TypeRef lowerReferenceType(TypeRef type);
