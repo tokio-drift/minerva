@@ -62,3 +62,5 @@ bool parseIR(const std::string &text, IRModule *module, std::vector<std::string>
 // Structural checks: function boundaries, instruction arity, temporaries, variables and labels.
 bool verifyIR(const IRModule &module, std::vector<std::string> *errors);
 bool optimizeIR(IRModule *module, std::vector<std::string> *errors);
+bool generateMIPS(const IRModule &module, std::string *assembly, std::vector<std::string> *errors);
+std::string emitMIPSRuntime();

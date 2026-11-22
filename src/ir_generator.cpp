@@ -855,8 +855,7 @@ IROperand IRGenerator::lowerExpression(Node *node) {
         return emitConstant(makeType(TypeKind::Char), std::to_string(bytes.empty() ? 0 : bytes[0]));
     }
     case NodeKind::StringLit:
-        unsupported(node->loc, "string literals are supported as printf/scanf format operands only");
-        return IROperand();
+        return emitConstant(makePointer(makeType(TypeKind::Char)), static_cast<const Literal *>(node)->text);
     case NodeKind::NullLit:
         // nullptr is represented as a typed null pointer constant in the IR.
         return emitConstant(makePointer(makeType(TypeKind::Void)), "0");
