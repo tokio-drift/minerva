@@ -14,14 +14,17 @@ PARSER_GEN  := $(BUILD_DIR)/parser.tab.cpp
 PARSER_HDR  := $(BUILD_DIR)/parser.tab.h
 
 CORE_SRC := src/ast.cpp src/types.cpp src/semantic.cpp src/ir.cpp \
-            src/ir_generator.cpp src/main.cpp
+            src/ir_generator.cpp src/ir_optimizer.cpp src/main.cpp
 CORE_HDR := src/ast.h src/types.h src/semantic.h src/frontend.h \
             src/diagnostic.h src/ir.h src/ir_generator.h
 
-.PHONY: all clean regen
+.PHONY: all clean regen test-frontend
 
 # Default command: build the compiler only.
 all: $(TARGET)
+
+test-frontend: $(TARGET)
+	python3 scripts/run_tests.py --compiler ./$(TARGET) --frontend
 
 $(BUILD_STAMP):
 	mkdir -p $(BUILD_DIR)
@@ -41,7 +44,7 @@ $(TARGET): $(LEX_GEN) $(PARSER_GEN) $(PARSER_HDR) $(CORE_SRC) $(CORE_HDR)
 # Remove compiler and generated output.
 clean:
 	rm -f $(TARGET) minerva_asan
-	rm -rf $(BUILD_DIR) ir typed_ast generated
+	rm -rf $(BUILD_DIR) ir typed_ast mips generated
 
 # Regenerate lexer and parser, then build the compiler.
 regen:
