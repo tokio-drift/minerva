@@ -11,6 +11,7 @@ EXE="${MINERVA_BIN:-$ROOT/minerva}"
 TEST_DIR="$ROOT/test"
 IR_DIR="$ROOT/ir"
 AST_DIR="$ROOT/typed_ast"
+MIPS_DIR="$ROOT/mips"
 
 case "$MODE" in
   ir|ast|clean) ;;
@@ -21,8 +22,8 @@ case "$MODE" in
 esac
 
 if [[ "$MODE" == "clean" ]]; then
-  rm -rf "$IR_DIR" "$AST_DIR"
-  echo "Removed generated IR and typed AST folders."
+  rm -rf "$IR_DIR" "$AST_DIR" "$MIPS_DIR"
+  echo "Removed generated IR, typed AST and MIPS folders."
   exit 0
 fi
 
@@ -42,7 +43,8 @@ fi
 # Find any number of supported files, including files in subdirectories.
 # No fixed test-count limit.
 mapfile -d '' -t SOURCES < <(
-  find "$TEST_DIR" -type f \( \
+  find "$TEST_DIR" -type f \
+    ! -path "$TEST_DIR/negative/*" ! -path "$TEST_DIR/ir/*" \( \
     -name '*.min' -o \
     -name '*.c' -o \
     -name '*.cpp' -o \
