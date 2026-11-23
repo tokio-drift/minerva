@@ -1,0 +1,2 @@
+struct Cycle { struct Cycle value; };
+int main() { return 0; }

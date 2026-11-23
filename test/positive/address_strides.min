@@ -1,0 +1,13 @@
+struct Grid { char tag; int values[2][3]; };
+int main() {
+    struct Grid grid;
+    int matrix[2][3] = {{1, 2, 3}, {4, 5, 6}};
+    char word[3] = "ab";
+    int *p = &matrix[0][0];
+    char *c = &word[0];
+    grid.tag = 'g';
+    grid.values[1][2] = matrix[1][2];
+    p++;
+    c++;
+    return *p + *c + grid.values[1][2] + (p - &matrix[0][0]);
+}

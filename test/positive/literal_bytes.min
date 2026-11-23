@@ -1,0 +1,12 @@
+enum Codes { NEWLINE = '\n', COMBINED = 0x10 + 0b11 };
+int main() {
+    char inferred[] = "a\n\\\"\0z";
+    char exact[2] = "ab";
+    char quote = '\'';
+    char zero = '\0';
+    char newline = '\n';
+    int value = 0x10 + 0b11;
+    char *pointer = &zero;
+    int logical = !1.5 + !pointer;
+    return sizeof(inferred) + sizeof(exact) + quote + zero + newline + value + NEWLINE + COMBINED + logical;
+}

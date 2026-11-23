@@ -1,0 +1,2 @@
+error[invalid-initializer]
+string literal is too long

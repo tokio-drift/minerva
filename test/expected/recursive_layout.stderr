@@ -1,0 +1,2 @@
+error[recursive-layout]
+recursive by-value layout

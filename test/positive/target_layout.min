@@ -1,0 +1,22 @@
+struct Mixed { char tag; int value; short tail; };
+union Overlap { char c; int value; short s; };
+class Base { public: char base; };
+class Child : public Base { public: short middle; int last; };
+struct Holder { struct Later value; };
+struct Later { char first; int last; };
+int main() {
+    struct Mixed mixed;
+    union Overlap shared;
+    Child child;
+    struct Holder holder;
+    int matrix[2][3];
+    mixed.tag = 'a';
+    mixed.value = 7;
+    mixed.tail = 2;
+    shared.value = 3;
+    child.base = 'b';
+    child.middle = 4;
+    child.last = 5;
+    holder.value.last = 6;
+    return sizeof(int*) + sizeof(mixed) + sizeof(shared) + sizeof(child) + sizeof(matrix) + sizeof(holder);
+}
