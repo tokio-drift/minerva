@@ -1,0 +1,43 @@
+int global = 4;
+int remember(int value) { snapshot global; global = value; return global; }
+int restore() { rewind global; return global; }
+int persistent(int save) {
+    static int value = 5;
+    if (save) { snapshot value; value = 8; }
+    else { rewind value; }
+    return value;
+}
+int recursive(int depth) {
+    int value = depth;
+    snapshot value;
+    value = 99;
+    int child = 0;
+    if (depth > 0) child = recursive(depth - 1);
+    rewind value;
+    return value + child;
+}
+int early(int value) {
+    int saved = value;
+    snapshot saved;
+    saved = 99;
+    if (value > 0) return value + 1;
+    return 0;
+}
+float floatReturn() { float value = 1.5; snapshot value; value = 2.5; return value; }
+int main() {
+    remember(10); remember(20);
+    int first = restore(), second = restore();
+    int stored = persistent(1), restored = persistent(0);
+    int shadow = 10;
+    snapshot shadow;
+    { int shadow = 20; snapshot shadow; shadow = 99; rewind shadow; if (shadow != 20) return 1; }
+    shadow = 99;
+    rewind shadow;
+    for (int i = 0; i < 2; i++) {
+        int local = i;
+        if (i == 0) { snapshot local; }
+        else { rewind local; if (local != 0) return 2; }
+    }
+    return first == 10 && second == 4 && stored == 8 && restored == 5 && shadow == 10 &&
+        recursive(3) == 6 && early(3) == 4 && early(0) == 0 && floatReturn() == 2.5 ? 0 : 3;
+}

@@ -1,0 +1,22 @@
+struct Large { int values[4]; };
+struct Small { int value; };
+int main() {
+    struct Large *first = new Large;
+    first->values[0] = 11;
+    void *saved = (void*)first;
+    delete first;
+    struct Small *second = new Small;
+    second->value = 7;
+    int reused = (void*)second == saved && second->value == 7;
+    delete second;
+    struct Small *nothing = nullptr;
+    delete nothing;
+    int sum = 0;
+    for (int i = 0; i < 4; i++) {
+        struct Small *item = new Small;
+        item->value = i;
+        sum += item->value;
+        delete item;
+    }
+    return reused && sum == 6 ? 0 : 1;
+}

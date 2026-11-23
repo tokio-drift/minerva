@@ -1,0 +1,48 @@
+struct Pair { char tag; int value; };
+int increment(int value) { return value + 1; }
+int main() {
+    int value = 10;
+    snapshot value;
+    value = 20;
+    snapshot value;
+    value = 30;
+    rewind value;
+    int first = value;
+    rewind value;
+    rewind value, 10;
+    int empty = 5;
+    rewind empty;
+    snapshot empty;
+    empty = 8;
+    rewind empty, 0;
+    rewind empty, -1;
+    int unchanged = empty;
+    rewind empty, 99;
+    float fraction = 1.5;
+    snapshot fraction;
+    fraction = 9.5;
+    rewind fraction;
+    int other = 2;
+    int *pointer = &other;
+    snapshot pointer;
+    pointer = &value;
+    rewind pointer;
+    int values[2] = {1, 2};
+    snapshot values;
+    values[0] = 9;
+    rewind values;
+    struct Pair pair = {'a', 7};
+    snapshot pair;
+    pair.tag = 'z'; pair.value = 8;
+    rewind pair;
+    int &alias = other;
+    snapshot alias;
+    other = 4;
+    rewind alias;
+    int a = 2, b = 3;
+    a <-> b;
+    int piped = 4 |> increment;
+    return first == 20 && value == 10 && unchanged == 8 && empty == 5 &&
+        fraction == 1.5 && pointer == &other && *pointer == 2 && values[0] == 1 && values[1] == 2 &&
+        pair.tag == 'a' && pair.value == 7 && alias == 2 && a == 3 && b == 2 && piped == 5 ? 0 : 1;
+}
