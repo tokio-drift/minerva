@@ -7,8 +7,36 @@ func increment(increment.value int) -> int {
   ret %t1
 }
 
+func combine(combine.a int, combine.b char, combine.c short, combine.d unsigned, combine.e float, combine.pointer int*) -> float {
+  %t0 = conv int combine.b
+  %t1 = add int combine.a, %t0
+  %t2 = conv int combine.c
+  %t3 = add int %t1, %t2
+  %t4 = conv unsigned %t3
+  %t5 = add unsigned %t4, combine.d
+  %t6 = conv float %t5
+  %t7 = add float %t6, combine.e
+  %t8 = load int combine.pointer
+  %t9 = conv float %t8
+  %t10 = add float %t7, %t9
+  ret %t10
+}
+
 func main() -> int {
-  %t0 = const int 4
-  %t1 = call int increment(%t0)
-  ret %t1
+  decl int main.value
+  %t0 = const int 6
+  main.value = copy %t0
+  %t1 = const int 0
+  %t2 = call int increment(%t1)
+  %t3 = const int 2
+  %t4 = conv char %t3
+  %t5 = const int 3
+  %t6 = conv short %t5
+  %t7 = const int 4
+  %t8 = conv unsigned %t7
+  %t9 = const float 5.5
+  %t10 = addr int* main.value
+  %t11 = call float combine(%t2, %t4, %t6, %t8, %t9, %t10)
+  %t12 = conv int %t11
+  ret %t12
 }
