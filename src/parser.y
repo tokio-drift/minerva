@@ -270,6 +270,10 @@ local_declarators
     | IDENTIFIER name_init_declarator_list { $$ = makeDeclStmt(L(@1), mkType(S($1)), $2); }
     | IDENTIFIER ptr_ref_chain name_init_declarator_list {
           $$ = makeDeclStmt(L(@1), mergeType(mkType(S($1)), 0, $2), $3); }
+    | type_qualifier_list IDENTIFIER name_init_declarator_list {
+          $$ = makeDeclStmt(L(@1), mergeType(mkType(S($2)), $1, nullptr), $3); }
+    | type_qualifier_list IDENTIFIER ptr_ref_chain name_init_declarator_list {
+          $$ = makeDeclStmt(L(@1), mergeType(mkType(S($2)), $1, $3), $4); }
     ;
 
 local_declaration
