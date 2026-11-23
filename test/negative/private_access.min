@@ -1,0 +1,2 @@
+class Vault { int value; };
+int main() { Vault vault; return vault.value; }
