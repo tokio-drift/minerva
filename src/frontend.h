@@ -25,3 +25,4 @@ extern std::unique_ptr<Program> g_program;
 void addTok(const std::string &tokenName);
 void addErr(const std::string &message);
 void resetLexerState();
+void scanTokens();

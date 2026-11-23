@@ -166,3 +166,7 @@ ID {LETTER}({LETTER}|{DIGIT})*
 . {addErr(string("Unrecognized character: '")+yytext+"'");}
 
 %%
+
+void scanTokens() {
+    while (yylex() != 0) {}
+}
