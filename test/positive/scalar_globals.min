@@ -1,0 +1,8 @@
+int initial = 35;
+int zero;
+char letter = 'A';
+short negative = -2;
+float fraction = 2.5;
+int main() {
+    return initial + zero + letter + negative + (int)fraction;
+}

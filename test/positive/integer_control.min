@@ -1,0 +1,17 @@
+int main() {
+    int sum = 0;
+    int touched = 0;
+    for (int i = 0; i < 5; i++) {
+        if (i == 2) continue;
+        sum += i;
+    }
+    while (sum < 10) sum++;
+    do { sum--; } while (sum > 8);
+    do { sum++; } until (sum >= 10);
+    for (;;) { if (sum == 10) break; sum++; }
+    0 && ++touched;
+    1 || ++touched;
+    goto done;
+    sum = 99;
+    done: return sum == 10 && touched == 0 ? 0 : 1;
+}

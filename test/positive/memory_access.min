@@ -1,0 +1,18 @@
+struct Mixed { char tag; int value; short tail; float fraction; };
+union Shared { int value; short part; };
+int main() {
+    int value = 5;
+    int *pointer = &value;
+    int **indirect = &pointer;
+    char *word = "az";
+    struct Mixed mixed;
+    union Shared shared;
+    **indirect = 7;
+    mixed.tag = (char)255;
+    mixed.value = **indirect;
+    mixed.tail = (short)65534;
+    mixed.fraction = 1.5;
+    shared.value = 513;
+    return value == 7 && mixed.tag == -1 && mixed.value == 7 && mixed.tail == -2 &&
+        mixed.fraction == 1.5 && shared.value == 513 && word[1] == 'z' ? 0 : 1;
+}
