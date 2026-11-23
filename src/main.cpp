@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -27,44 +28,110 @@ extern FILE *yyin;
 int yyparse(void);
 int yylex_destroy(void);
 
-static const char *RED = "\033[1;31m";
-static const char *GREEN = "\033[1;32m";
-static const char *ENDCLR = "\033[0m";
+enum class Stage { Unset, Lex, Ast, TypedAst, Semantic, IR, MIPS, VerifyIR, Help };
 
-static void usage(const char *prog) {
-    std::cerr << "Usage: " << prog << " [--dump-ast|--dump-typed-ast] [--semantic] <source-file> [-o <output.ir>]\n";
-    std::cerr << "       " << prog << " --verify-ir <file.ir>\n";
+struct Options {
+    Stage stage = Stage::Unset;
+    std::string input;
+    std::string output;
+    bool optimizationSet = false;
+    int optimization = 0;
+};
+
+static void usage(const char *prog, std::ostream &out) {
+    out << "Usage: " << prog << " [STAGE] <source-file> [-o <path>|-o -] [-O0|-O1]\n"
+        << "       " << prog << " --verify-ir <file.ir>\n"
+        << "       " << prog << " --help\n\n"
+        << "Stages: --lex, --ast, --typed-ast, --semantic, --ir, --mips\n"
+        << "Aliases: --dump-ast, --dump-typed-ast\n"
+        << "Default: --lex; with -o and no stage: --ir. Output defaults to stdout.\n"
+        << "Output: -o path, -opath, or -o - for stdout, for any compilation stage.\n"
+        << "Optimization: -O0 (default), -O1 for IR/MIPS; local integer folding and temporary propagation.\n"
+        << "MIPS backend is unavailable until phase 7.\n"
+        << "Exits: 0 success, 1 usage/file, 2 lex/syntax, 3 semantic, 4 IR, 5 backend.\n";
 }
 
-static void printTokenTable() {
-    std::cout << GREEN << "\nTOKEN TABLE\n" << ENDCLR;
-    std::cout << std::left << std::setw(8) << "LINE" << std::setw(24) << "LEXEME"
-              << std::setw(22) << "TOKEN" << "\n";
-    std::cout << std::string(50, '-') << "\n";
-    for (auto &t : g_tokens) {
-        std::cout << std::left << std::setw(8) << t.line << std::setw(24) << t.lexeme
-                  << std::setw(22) << t.token << "\n";
+static Stage namedStage(const std::string &arg) {
+    if (arg == "--lex") return Stage::Lex;
+    if (arg == "--ast" || arg == "--dump-ast") return Stage::Ast;
+    if (arg == "--typed-ast" || arg == "--dump-typed-ast") return Stage::TypedAst;
+    if (arg == "--semantic") return Stage::Semantic;
+    if (arg == "--ir") return Stage::IR;
+    if (arg == "--mips") return Stage::MIPS;
+    if (arg == "--verify-ir") return Stage::VerifyIR;
+    if (arg == "--help") return Stage::Help;
+    return Stage::Unset;
+}
+
+static bool selectStage(Options &options, Stage stage) {
+    if (options.stage != Stage::Unset && options.stage != stage) return false;
+    options.stage = stage;
+    return true;
+}
+
+static bool takeArgument(int argc, char **argv, int &index, std::string &value, bool allowDash) {
+    if (index + 1 >= argc || !value.empty()) return false;
+    std::string next = argv[index + 1];
+    if (next.empty() || (next[0] == '-' && !(allowDash && next == "-"))) return false;
+    value = next;
+    ++index;
+    return true;
+}
+
+// Select a single stage before applying the legacy output-only IR default.
+static bool parseOptions(int argc, char **argv, Options &options) {
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        Stage stage = namedStage(arg);
+        if (stage != Stage::Unset) {
+            if (!selectStage(options, stage)) return false;
+            if (stage == Stage::VerifyIR && !takeArgument(argc, argv, i, options.input, false))
+                return false;
+        } else if (arg == "-o") {
+            if (!takeArgument(argc, argv, i, options.output, true)) return false;
+        } else if (arg.size() > 2 && arg.compare(0, 2, "-o") == 0) {
+            if (!options.output.empty()) return false;
+            options.output = arg.substr(2);
+        } else if (arg == "-O0" || arg == "-O1") {
+            options.optimizationSet = true;
+            options.optimization = arg.back() - '0';
+        } else if (arg.empty() || arg[0] == '-' || !options.input.empty()) {
+            return false;
+        } else {
+            options.input = arg;
+        }
     }
-    std::cout << std::string(50, '-') << "\n";
-    std::cout << "Total tokens: " << g_tokens.size() << "\n";
-    std::cout << "Status: " << GREEN << "VALID" << ENDCLR << " (0 errors)\n";
+    if (options.stage == Stage::Help) return argc == 2;
+    if (options.input.empty()) return false;
+    if (options.stage == Stage::Unset)
+        options.stage = options.output.empty() ? Stage::Lex : Stage::IR;
+    if (options.stage == Stage::VerifyIR && !options.output.empty()) return false;
+    return !options.optimizationSet || options.stage == Stage::IR || options.stage == Stage::MIPS;
+}
+
+static void printTokenTable(std::ostream &out) {
+    out << "TOKEN TABLE\n";
+    out << std::left << std::setw(8) << "LINE" << std::setw(24) << "LEXEME"
+        << "TOKEN\n";
+    out << std::string(50, '-') << "\n";
+    for (const auto &token : g_tokens) {
+        out << std::left << std::setw(8) << token.line << std::setw(24) << token.lexeme
+            << token.token << "\n";
+    }
+    out << std::string(50, '-') << "\n";
+    out << "Total tokens: " << g_tokens.size() << "\n";
 }
 
 static void printErrorReport(const std::string &path) {
-    std::cerr << RED << "\nSYNTAX/LEXICAL ERRORS\n" << ENDCLR;
-    for (auto &e : g_errors) {
-        std::cerr << path << ":" << e.line << ":" << e.col << ": error: " << e.message << "\n";
-    }
-    std::cerr << std::string(50, '-') << "\n";
-    std::cerr << "Total errors: " << g_errors.size() << "\n";
-    std::cerr << "Status: " << RED << "INVALID\n" << ENDCLR;
+    for (const auto &error : g_errors)
+        std::cerr << path << ":" << error.line << ":" << error.col << ": error: " << error.message << "\n";
+    std::cerr << g_errors.size() << " error(s)\n";
 }
 
 static void printDiagnostics(const std::string &path, const std::vector<Diagnostic> &diags) {
-    for (const auto &d : diags) {
-        std::cerr << path << ":" << d.loc.line << ":" << d.loc.col << ": error[" << d.category
-                  << "]: " << d.message << "\n";
-    }
+    for (const auto &diag : diags)
+        std::cerr << path << ":" << diag.loc.line << ":" << diag.loc.col << ": error["
+                  << diag.category << "]: " << diag.message << "\n";
     std::cerr << diags.size() << " error(s)\n";
 }
 
@@ -100,8 +167,7 @@ static std::string nodeDescription(const Node &node) {
 }
 
 static void dumpTypeAnnotations(const Node &node, const Analyzer &analyzer, std::ostream &out) {
-    // Declarations are listed before expressionInfo so their output is labelled
-    // as a declaration rather than as an expression value.
+    // List declaration types before expression annotations.
     if (node.kind == NodeKind::VarDecl || node.kind == NodeKind::Param) {
         TypeRef type = analyzer.typeOfDecl(static_cast<const VarDecl *>(&node));
         if (type) {
@@ -126,34 +192,7 @@ static void dumpTypeAnnotations(const Node &node, const Analyzer &analyzer, std:
     });
 }
 
-static int runTypedAst(const std::string &path) {
-    Analyzer analyzer;
-    analyzer.analyze(*g_program);
-    if (!analyzer.diagnostics().empty()) {
-        printDiagnostics(path, analyzer.diagnostics());
-        return 3;
-    }
-    std::cout << "TYPED AST (structural tree followed by semantic type annotations)\n";
-    dumpAst(*g_program, std::cout);
-    std::cout << "\nTYPE ANNOTATIONS\n";
-    dumpTypeAnnotations(*g_program, analyzer, std::cout);
-    return 0;
-}
-
-static int runSemantic(const std::string &path) {
-    Analyzer analyzer;
-    analyzer.analyze(*g_program);
-    const auto &diags = analyzer.diagnostics();
-    if (!diags.empty()) {
-        printDiagnostics(path, diags);
-        return 3;
-    }
-    std::cout << "semantic analysis: no errors\n";
-    return 0;
-}
-
-// Writes the content to a temporary file in the target directory and renames it
-// over the target, so that a failure never leaves a partial file behind.
+// Replace the output only after the complete temporary file is written.
 static bool publishOutput(const std::string &path, const std::string &content) {
     size_t slash = path.find_last_of('/');
     std::string dir = slash == std::string::npos ? std::string(".") : path.substr(0, slash);
@@ -201,159 +240,167 @@ static bool publishOutput(const std::string &path, const std::string &content) {
     return true;
 }
 
-static int runIRPipeline(const std::string &sourcePath, const std::string &outputPath) {
-    Analyzer analyzer;
-    analyzer.analyze(*g_program);
-    if (!analyzer.diagnostics().empty()) {
-        printDiagnostics(sourcePath, analyzer.diagnostics());
-        return 3;
-    }
-
-    IRModule module;
-    IRGenerator generator;
-    if (!generator.generate(*g_program, analyzer, &module)) {
-        printDiagnostics(sourcePath, generator.diagnostics());
-        return 4;
-    }
-
-    // The published file is the text that was read back and verified.
-    std::string text = serializeIR(module);
-    IRModule reparsed;
+static int verifyIRText(const std::string &path, const std::string &text, IRModule *module) {
     std::vector<std::string> errors;
-    if (!parseIR(text, &reparsed, &errors)) {
-        std::cerr << sourcePath << ": error[ir-error]: the generated IR cannot be read back\n";
-        for (const auto &e : errors) std::cerr << "  " << e << "\n";
-        return 4;
-    }
-    if (!verifyIR(reparsed, &errors)) {
-        std::cerr << sourcePath << ": error[ir-error]: the generated IR is not valid\n";
-        for (const auto &e : errors) std::cerr << "  " << e << "\n";
-        return 4;
-    }
+    if (parseIR(text, module, &errors) && verifyIR(*module, &errors)) return 0;
+    for (const auto &error : errors)
+        std::cerr << path << ": error[ir-error]: " << error << "\n";
+    return 4;
+}
 
-    if (!publishOutput(outputPath, serializeIR(reparsed))) return 1;
-    std::cout << "wrote " << outputPath << "\n";
-    return 0;
+static int buildVerifiedIR(const std::string &path, const Analyzer &analyzer, IRModule *module, int optimization) {
+    IRModule generated;
+    IRGenerator generator;
+    if (!generator.generate(*g_program, analyzer, &generated)) {
+        printDiagnostics(path, generator.diagnostics());
+        return 4;
+    }
+    IRModule checked;
+    int status = verifyIRText(path, serializeIR(generated), &checked);
+    if (status != 0) return status;
+    if (optimization == 0) { *module = std::move(checked); return 0; }
+    std::vector<std::string> errors;
+    if (!optimizeIR(&checked, &errors)) {
+        for (const auto &error : errors) std::cerr << path << ": error[ir-error]: " << error << "\n";
+        return 4;
+    }
+    return verifyIRText(path, serializeIR(checked), module);
+}
+
+static bool checkInputFile(const std::string &path) {
+    struct stat info;
+    if (stat(path.c_str(), &info) == 0 && S_ISREG(info.st_mode)) return true;
+    std::cerr << "Error: cannot open file '" << path << "'\n";
+    return false;
 }
 
 static int verifyIRFile(const std::string &path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
+    if (!checkInputFile(path)) return 1;
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
         std::cerr << "Error: cannot open file '" << path << "'\n";
         return 1;
     }
-    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     IRModule module;
-    std::vector<std::string> errors;
-    if (!parseIR(text, &module, &errors)) {
-        for (const auto &e : errors) std::cerr << path << ": error[ir-error]: " << e << "\n";
-        return 4;
+    int status = verifyIRText(path, text, &module);
+    if (status == 0) std::cout << "verified " << path << "\n";
+    return status;
+}
+
+static int readSource(const Options &options) {
+    if (!checkInputFile(options.input)) return 1;
+    FILE *input = fopen(options.input.c_str(), "r");
+    if (!input) {
+        std::cerr << "Error: cannot open file '" << options.input << "'\n";
+        return 1;
     }
-    if (!verifyIR(module, &errors)) {
-        for (const auto &e : errors) std::cerr << path << ": error[ir-error]: " << e << "\n";
-        return 4;
+    resetLexerState();
+    yyin = input;
+    int result = 0;
+    if (options.stage == Stage::Lex) scanTokens();
+    else result = yyparse();
+    if (result != 0 && g_errors.empty())
+        g_errors.push_back({yylineno, yylloc.first_column, "parser aborted with status " + std::to_string(result)});
+    if (options.stage != Stage::Lex && g_errors.empty() && !g_program)
+        g_errors.push_back({yylineno, yylloc.first_column, "internal error: no AST was produced"});
+    yylex_destroy();
+    fclose(input);
+    if (g_errors.empty()) return 0;
+    printErrorReport(options.input);
+    return 2;
+}
+
+static bool validMain(const Analyzer &analyzer) {
+    for (const auto &item : g_program->items) {
+        if (item->kind != NodeKind::FuncDef) continue;
+        const auto *function = static_cast<const FuncDef *>(item.get());
+        if (function->name != "main") continue;
+        TypeRef type = analyzer.typeOfFunction(function);
+        if (!type || type->ret->kind != TypeKind::Int) return false;
+        if (type->params.empty()) return true;
+        if (type->params.size() != 2 || type->params[0]->kind != TypeKind::Int) return false;
+        TypeRef argv = type->params[1];
+        return argv->isPointer() && argv->sub->isPointer() && argv->sub->sub->kind == TypeKind::Char;
     }
-    std::cout << "verified " << path << "\n";
+    return false;
+}
+
+// Check semantic output before gating executable entry points.
+static int renderAnalyzedStage(const Options &options, std::ostream &out) {
+    Analyzer analyzer;
+    analyzer.analyze(*g_program);
+    if (!analyzer.diagnostics().empty()) {
+        printDiagnostics(options.input, analyzer.diagnostics());
+        return 3;
+    }
+    if (options.stage == Stage::TypedAst) {
+        out << "TYPED AST (structural tree followed by semantic type annotations)\n";
+        dumpAst(*g_program, out);
+        out << "\nTYPE ANNOTATIONS\n";
+        dumpTypeAnnotations(*g_program, analyzer, out);
+        return 0;
+    }
+    if (options.stage == Stage::Semantic) {
+        out << "semantic analysis: no errors\n";
+        dumpTypeAnnotations(*g_program, analyzer, out);
+        return 0;
+    }
+    if (options.stage == Stage::MIPS && !validMain(analyzer)) {
+        std::cerr << options.input << ": error[entry-error]: MIPS requires int main() or int main(int, char**)\n";
+        return 5;
+    }
+    IRModule module;
+    int status = buildVerifiedIR(options.input, analyzer, &module, options.optimization);
+    if (status != 0) return status;
+    if (options.stage == Stage::MIPS) {
+        std::cerr << options.input << ": error[backend-unavailable]: MIPS backend is not implemented yet\n";
+        return 5;
+    }
+    out << serializeIR(module);
     return 0;
 }
 
+static int renderStage(const Options &options, std::ostream &out) {
+    if (options.stage == Stage::Lex) {
+        printTokenTable(out);
+        return 0;
+    }
+    if (options.stage == Stage::Ast) {
+        dumpAst(*g_program, out);
+        return 0;
+    }
+    return renderAnalyzedStage(options, out);
+}
+
+static int writeArtifact(const Options &options, std::string artifact) {
+    while (!artifact.empty() && artifact.back() == '\n') artifact.pop_back();
+    artifact += '\n';
+    if (!options.output.empty() && options.output != "-")
+        return publishOutput(options.output, artifact) ? 0 : 1;
+    std::cout << artifact;
+    std::cout.flush();
+    if (std::cout) return 0;
+    std::cerr << "Error: cannot write output to stdout\n";
+    return 1;
+}
+
 int main(int argc, char **argv) {
-    bool dumpTree = false;
-    bool dumpTypedTree = false;
-    bool semanticOnly = false;
-    std::string sourcePath;
-    std::string outputPath;
-    std::string verifyPath;
-    for (int i = 1; i < argc; i++) {
-        std::string arg = argv[i];
-        if (arg == "--dump-ast") {
-            dumpTree = true;
-        } else if (arg == "--dump-typed-ast") {
-            dumpTypedTree = true;
-        } else if (arg == "--semantic") {
-            semanticOnly = true;
-        } else if (arg == "-o") {
-            if (i + 1 >= argc) {
-                usage(argv[0]);
-                return 1;
-            }
-            outputPath = argv[++i];
-        } else if (arg.size() > 2 && arg.compare(0, 2, "-o") == 0) {
-            outputPath = arg.substr(2);
-        } else if (arg == "--verify-ir") {
-            if (i + 1 >= argc) {
-                usage(argv[0]);
-                return 1;
-            }
-            verifyPath = argv[++i];
-        } else if (!arg.empty() && arg[0] == '-') {
-            usage(argv[0]);
-            return 1;
-        } else if (sourcePath.empty()) {
-            sourcePath = arg;
-        } else {
-            usage(argv[0]);
-            return 1;
-        }
-    }
-
-    if (!verifyPath.empty()) {
-        if (!sourcePath.empty() || !outputPath.empty()) {
-            usage(argv[0]);
-            return 1;
-        }
-        return verifyIRFile(verifyPath);
-    }
-
-    if (sourcePath.empty()) {
-        usage(argv[0]);
+    Options options;
+    if (!parseOptions(argc, argv, options)) {
+        usage(argv[0], std::cerr);
         return 1;
     }
-    FILE *f = fopen(sourcePath.c_str(), "r");
-    if (!f) {
-        std::cerr << "Error: cannot open file '" << sourcePath << "'\n";
-        return 1;
+    if (options.stage == Stage::Help) {
+        usage(argv[0], std::cout);
+        return 0;
     }
-
-    resetLexerState();
-    yyin = f;
-    int rc = yyparse();
-    yylex_destroy();   // free flex's buffer stack (also required before a second compilation)
-    fclose(f);
-
-    // A parser abort (syntax error, memory exhaustion) must never look like success.
-    if (rc != 0 && g_errors.empty()) {
-        g_errors.push_back({yylineno, yylloc.first_column,
-                            "parser aborted with status " + std::to_string(rc)});
-    }
-    if (g_errors.empty() && !g_program) {
-        g_errors.push_back({yylineno, yylloc.first_column, "internal error: no AST was produced"});
-    }
-
-    if (!g_errors.empty()) {
-        g_program.reset();
-        resetInterned();
-        printErrorReport(sourcePath);
-        return 2;
-    }
-
-    int status = 0;
-    if (dumpTypedTree) {
-        status = runTypedAst(sourcePath);
-    } else if (dumpTree) {
-        dumpAst(*g_program, std::cout);
-    } else if (!outputPath.empty()) {
-        status = runIRPipeline(sourcePath, outputPath);
-    } else if (semanticOnly) {
-        status = runSemantic(sourcePath);
-    } else {
-        printTokenTable();
-    }
-    size_t unsup = countUnsupported(*g_program);
-    if (unsup > 0) {
-        std::cerr << "note: " << unsup << " construct(s) parsed but not yet supported by later stages\n";
-    }
+    if (options.stage == Stage::VerifyIR) return verifyIRFile(options.input);
+    int status = readSource(options);
+    std::ostringstream artifact;
+    if (status == 0) status = renderStage(options, artifact);
     g_program.reset();
     resetInterned();
-    return status;
+    if (status != 0) return status;
+    return writeArtifact(options, artifact.str());
 }
