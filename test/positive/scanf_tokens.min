@@ -1,0 +1,16 @@
+int main() {
+    int a = 0, b = 0;
+    unsigned large = 0;
+    float fraction = 0.0, small = 0.0;
+    char letter = '?', newline = '?', bad = '?';
+    char word[5];
+    scanf("%d %d,%u;%f %f %c %4s%c%%", &a, &b, &large, &fraction, &small, &letter, word, &newline);
+    int failed = 77, eof = 88;
+    scanf("%d", &failed);
+    scanf("%c", &bad);
+    scanf("%d", &eof);
+    return a == 12 && b == -3 && large == (unsigned)-294967296 &&
+        fraction == -12.5 && small == 0.25 && letter == 'Z' &&
+        word[0] == 'a' && word[3] == 'd' && word[4] == '\0' && newline == '\n' &&
+        failed == 77 && bad == 'x' && eof == 88 ? 0 : 1;
+}

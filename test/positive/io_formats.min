@@ -1,0 +1,9 @@
+int calls;
+int next() { calls++; return 7; }
+int main() {
+    printf("d=%d u=%u f=%f c=%c s=%s %%\n", (int)0x80000000, (unsigned)-1, 1.5, 'Q', "hi");
+    printf("once=%d\n", next());
+    int value = 0;
+    scanf("%d", &value);
+    return calls == 1 && value == 9 ? 0 : 1;
+}
