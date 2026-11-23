@@ -51,50 +51,12 @@ std::string arithmeticMnemonic(const std::string &op) {
     return "shr";
 }
 
-TypeRef simpleTypeSpelling(const std::string &spelling) {
-    size_t end = spelling.size();
-    while (end && (spelling[end - 1] == '*' || spelling[end - 1] == '&')) --end;
-    std::string base = spelling.substr(0, end);
-    TypeRef type;
-    if (base.rfind("struct ", 0) == 0) base = base.substr(7);
-    else if (base.rfind("union ", 0) == 0) base = base.substr(6);
-    else if (base.rfind("enum ", 0) == 0) { type = makeType(TypeKind::Int); base.clear(); }
-    if (type) { /* enum values use the implementation's int representation */ }
-    else if (base == "void") type = makeType(TypeKind::Void);
-    else if (base == "int") type = makeType(TypeKind::Int);
-    else if (base == "char") type = makeType(TypeKind::Char);
-    else if (base == "short") type = makeType(TypeKind::Short);
-    else if (base == "float") type = makeType(TypeKind::Float);
-    else if (base == "unsigned") type = makeType(TypeKind::Unsigned);
-    else type = makeAggregate(base);
-    for (size_t i = end; i < spelling.size(); ++i)
-        type = spelling[i] == '*' ? makePointer(type) : makeReference(type);
-    return type;
-}
-
 TypeRef commonType(TypeRef a, TypeRef b) {
     if (!a) return b;
     if (!b) return a;
     if (sameType(a, b)) return a;
     if (a->isNumeric() && b->isNumeric()) return usualArithmetic(a, b);
     return a;
-}
-
-// The text of a constant initializer, empty when the expression is not a constant.
-std::string constantText(const Node *node) {
-    if (!node) return "";
-    if (node->kind == NodeKind::IntLit || node->kind == NodeKind::FloatLit ||
-        node->kind == NodeKind::CharLit)
-        return static_cast<const Literal *>(node)->text;
-    if (node->kind == NodeKind::Unary) {
-        const Unary &u = *static_cast<const Unary *>(node);
-        if (u.op == "-" || u.op == "+") {
-            std::string inner = constantText(u.operand.get());
-            if (inner.empty()) return "";
-            return u.op == "-" ? "-" + inner : inner;
-        }
-    }
-    return "";
 }
 
 }  // namespace
@@ -111,7 +73,7 @@ void IRGenerator::irError(const SrcLoc &loc, const std::string &message) {
 
 TypeRef IRGenerator::typeOfExpression(const Node *node) {
     ExprInfo info;
-    if (analyzer_ && analyzer_->expressionInfo(node, &info)) return info.type;
+    if (analyzer_ && analyzer_->expressionInfo(node, &info)) return lowerReferenceType(info.type);
     return nullptr;
 }
 
@@ -172,15 +134,24 @@ std::string IRGenerator::localName(const std::string &name) const {
     return name;
 }
 
+// Export target layouts before lowering storage and function bodies.
 bool IRGenerator::generate(const Program &program, const Analyzer &analyzer, IRModule *module) {
     analyzer_ = &analyzer;
     module_ = module;
     diagnostics_.clear();
     failed_ = false;
+    module->layouts = analyzer.layouts();
+    for (auto &layout : module->layouts)
+        for (auto &field : layout.fields) field.type = lowerReferenceType(field.type);
+    storageNames_.clear();
+    globalHistoryHeads_.clear();
     module->globals.clear();
     module->functions.clear();
 
     for (const auto &item : program.items) {
+        if (item->kind == NodeKind::Directive) {
+            unsupported(item->loc, "preprocessor directives are not expanded"); return false;
+        }
         if (item->kind == NodeKind::DeclStmt) {
             const DeclStmt &ds = *static_cast<const DeclStmt *>(item.get());
             for (const auto &d : ds.decls) {
@@ -198,6 +169,7 @@ bool IRGenerator::generate(const Program &program, const Analyzer &analyzer, IRM
         ins.op = IROp::Global;
         ins.type = makeAggregate(u.name);
         ins.dest = IROperand::variable(u.declVar, ins.type);
+        storageNames_[&u] = u.declVar;
         module->globals.push_back(ins);
     }
 
@@ -232,8 +204,9 @@ bool IRGenerator::generate(const Program &program, const Analyzer &analyzer, IRM
     return true;
 }
 
-bool IRGenerator::lowerGlobal(const VarDecl &decl) {
-    TypeRef type = analyzer_->typeOfDecl(&decl);
+// Static locals use the same module storage as ordinary globals.
+bool IRGenerator::lowerGlobal(const VarDecl &decl, const std::string &name) {
+    TypeRef type = lowerReferenceType(analyzer_->typeOfDecl(&decl));
     if (!type) {
         irError(decl.loc, "no type was resolved for '" + decl.name + "'");
         return false;
@@ -246,12 +219,17 @@ bool IRGenerator::lowerGlobal(const VarDecl &decl) {
     IRInstruction ins;
     ins.op = IROp::Global;
     ins.type = type;
-    ins.dest = IROperand::variable(decl.name, type);
+    ins.dest = IROperand::variable(name.empty() ? decl.name : name, type);
+    storageNames_[&decl] = ins.dest.name;
+    if (type->isArray() || type->kind == TypeKind::Aggregate) {
+        module_->globals.push_back(ins);
+        if (decl.init) lowerInitializer(decl.init.get(), type, ins.dest, 0, true);
+        return !failed_;
+    }
     if (decl.init) {
-        std::string text = constantText(decl.init.get());
-        if (text.empty()) {
-            unsupported(decl.loc,
-                        "the initializer of the global '" + decl.name + "' must be a constant");
+        std::string text;
+        if (!analyzer_->constantScalar(decl.init.get(), type, &text)) {
+            unsupported(decl.loc, "the initializer of the global '" + decl.name + "' must be a constant");
             return false;
         }
         ins.args.push_back(IROperand::literal(text, type));
@@ -260,6 +238,7 @@ bool IRGenerator::lowerGlobal(const VarDecl &decl) {
     return true;
 }
 
+// Captureless lambdas use the ordinary function representation.
 bool IRGenerator::lowerLambda(const Unsupported &lambda) {
     TypeRef signature = analyzer_->lambdaType(&lambda);
     std::string name = analyzer_->lambdaName(&lambda);
@@ -274,10 +253,13 @@ bool IRGenerator::lowerLambda(const Unsupported &lambda) {
         else if (kid->kind == NodeKind::Block) body = static_cast<const Block *>(kid.get());
     }
     if (!body) { unsupported(lambda.loc, "lambda without a body"); return false; }
-    IRFunction ir; ir.name = name; ir.returnType = signature->ret;
+    IRFunction ir; ir.name = name; ir.returnType = lowerReferenceType(signature->ret);
+    sourceReturnType_ = signature->ret;
+    referenceTypes_.clear();
+    resetHistory();
     scopes_.clear(); scopes_.emplace_back(); usedNames_.clear();
     tempCounter_ = 0; labelCounter_ = 0;
-    loopTargets_.clear(); breakTargets_.clear(); userLabels_.clear(); switchLabels_.clear(); switchDefaults_.clear();
+    loopTargets_.clear(); breakTargets_.clear(); userLabels_.clear(); switchLabels_.clear();
     currentMethodClass_.clear(); function_ = &ir;
     collectUserLabels(const_cast<Block *>(body));
     for (size_t i = 0; i < params.size(); ++i) {
@@ -286,29 +268,36 @@ bool IRGenerator::lowerLambda(const Unsupported &lambda) {
         std::string paramName = param.name.empty() ? "__arg" + std::to_string(i) : param.name;
         std::string irName = declareLocal(paramName);
         scopes_.back()[paramName] = irName;
-        ir.params.push_back(IROperand::variable(irName, type));
+        storageNames_[&param] = irName;
+        if (type->kind == TypeKind::Reference) referenceTypes_[irName] = referencedType(type);
+        ir.params.push_back(IROperand::variable(irName, lowerReferenceType(type)));
     }
     lowerStatement(const_cast<Block *>(body));
+    finishHistory();
     function_ = nullptr;
     if (failed_) return false;
     module_->functions.push_back(std::move(ir));
     return true;
 }
 
+// Retain source reference signatures while lowering their storage.
 bool IRGenerator::lowerFunction(const FuncDef &fn) {
     TypeRef signature = analyzer_->typeOfFunction(&fn);
     if (!signature || !signature->ret) {
         irError(fn.loc, "no signature was resolved for '" + fn.name + "'");
         return false;
     }
-    if (!representable(signature->ret)) {
+    if (!representable(lowerReferenceType(signature->ret))) {
         unsupported(fn.loc, "the return type of '" + fn.name + "' is not representable in the IR yet");
         return false;
     }
 
     IRFunction ir;
     ir.name = analyzer_->functionName(&fn);
-    ir.returnType = signature->ret;
+    ir.returnType = lowerReferenceType(signature->ret);
+    sourceReturnType_ = signature->ret;
+    referenceTypes_.clear();
+    resetHistory();
     currentMethodClass_ = analyzer_->methodOwner(&fn);
 
     scopes_.clear();
@@ -317,7 +306,7 @@ bool IRGenerator::lowerFunction(const FuncDef &fn) {
     tempCounter_ = 0;
     labelCounter_ = 0;
     loopTargets_.clear(); breakTargets_.clear();
-    userLabels_.clear(); switchLabels_.clear(); switchDefaults_.clear();
+    userLabels_.clear(); switchLabels_.clear();
     function_ = &ir;
     collectUserLabels(fn.body.get());
 
@@ -338,7 +327,7 @@ bool IRGenerator::lowerFunction(const FuncDef &fn) {
         }
         TypeRef type = i + parameterOffset < signature->params.size() ? signature->params[i + parameterOffset]
                                                     : analyzer_->typeOfDecl(&param);
-        if (!type || !representable(type)) {
+        if (!type || !representable(lowerReferenceType(type))) {
             unsupported(param.loc,
                         "the parameter '" + param.name + "' has a type the IR cannot represent yet");
             function_ = nullptr;
@@ -346,10 +335,13 @@ bool IRGenerator::lowerFunction(const FuncDef &fn) {
         }
         std::string name = declareLocal(param.name);
         scopes_.back()[param.name] = name;
-        ir.params.push_back(IROperand::variable(name, type));
+        storageNames_[&param] = name;
+        if (type->kind == TypeKind::Reference) referenceTypes_[name] = referencedType(type);
+        ir.params.push_back(IROperand::variable(name, lowerReferenceType(type)));
     }
 
     if (fn.body) lowerStatement(fn.body.get());
+    finishHistory();
     function_ = nullptr;
     currentMethodClass_.clear();
     if (failed_) return false;
@@ -357,6 +349,7 @@ bool IRGenerator::lowerFunction(const FuncDef &fn) {
     return true;
 }
 
+// Lower statements with their active scope and branch targets.
 void IRGenerator::lowerStatement(Node *node) {
     if (!node || failed_) return;
     switch (node->kind) {
@@ -385,7 +378,8 @@ void IRGenerator::lowerStatement(Node *node) {
         IRInstruction ins;
         ins.op = IROp::Return;
         if (r.value) {
-            IROperand value = lowerExpression(r.value.get());
+            IROperand value = sourceReturnType_ && sourceReturnType_->kind == TypeKind::Reference
+                ? lowerAddress(r.value.get()) : lowerExpression(r.value.get());
             if (failed_) break;
             value = emitConvert(value, function_->returnType);
             ins.args.push_back(value);
@@ -466,7 +460,6 @@ void IRGenerator::lowerStatement(Node *node) {
         case UnsupKind::Case: case UnsupKind::Default: {
             auto it = switchLabels_.find(node);
             if (it != switchLabels_.end()) emitLabel(it->second);
-            else { auto def = switchDefaults_.find(node); if (def != switchDefaults_.end()) emitLabel(def->second); }
             if (u.kind == UnsupKind::Case && u.kids.size() > 1) lowerStatement(u.kids[1].get());
             else if (u.kind == UnsupKind::Default && !u.kids.empty()) lowerStatement(u.kids[0].get());
             break;
@@ -483,39 +476,17 @@ void IRGenerator::lowerStatement(Node *node) {
                                                makePointer(makeType(TypeKind::Char)));
                 } else value = lowerExpression(arg.get());
                 if (failed_) break;
+                if (u.kind == UnsupKind::Printf && !args.empty() && value.type &&
+                    (value.type->kind == TypeKind::Char || value.type->kind == TypeKind::Short))
+                    value = emitConvert(value, makeType(TypeKind::Int));
                 args.push_back(value);
             }
             if (!failed_) lowerRuntimeCall(u.kind == UnsupKind::Printf ? "printf" : "scanf", makeType(TypeKind::Int), args, true);
             break;
         }
-        case UnsupKind::Snapshot: case UnsupKind::Rewind: {
-            std::string variableName = localName(u.name);
-            TypeRef variableType;
-            for (const auto &ins : function_->body)
-                if (ins.op == IROp::Decl && ins.dest.name == variableName) { variableType = ins.type; break; }
-            if (!variableType) {
-                for (const auto &param : function_->params)
-                    if (param.name == variableName) { variableType = param.type; break; }
-            }
-            if (!variableType) {
-                for (const auto &global : module_->globals)
-                    if (global.dest.name == u.name) { variableType = global.type; variableName = u.name; break; }
-            }
-            if (!variableType) { unsupported(node->loc, "cannot resolve snapshot variable '" + u.name + "'"); break; }
-            IROperand variable = IROperand::variable(variableName, variableType);
-            TypeRef pointerType = makePointer(variableType);
-            IRInstruction address; address.op = IROp::Address; address.type = pointerType;
-            address.dest = IROperand::temp(newTemp(), pointerType); address.args = {variable};
-            function_->body.push_back(address);
-            std::vector<IROperand> args{address.dest};
-            if (u.kind == UnsupKind::Rewind) {
-                IROperand count = u.kids.empty() || !u.kids[0] ? emitConstant(makeType(TypeKind::Int), "1") : lowerExpression(u.kids[0].get());
-                if (failed_) break;
-                args.push_back(count);
-            }
-            lowerRuntimeCall(u.kind == UnsupKind::Snapshot ? "__minerva_snapshot" : "__minerva_rewind", makeType(TypeKind::Void), args, false);
+        case UnsupKind::Snapshot: case UnsupKind::Rewind:
+            lowerHistory(u);
             break;
-        }
         case UnsupKind::Pipe: case UnsupKind::Swap: case UnsupKind::Cast:
         case UnsupKind::Sizeof: case UnsupKind::New: case UnsupKind::Delete:
         case UnsupKind::Member:
@@ -531,42 +502,134 @@ void IRGenerator::lowerStatement(Node *node) {
     }
 }
 
-void IRGenerator::lowerSwitch(const Unsupported &node) {
-    if (node.kids.empty()) { unsupported(node.loc, "switch has no controlling expression"); return; }
-    IROperand value = lowerExpression(node.kids[0].get());
-    if (failed_) return;
-    const std::string end = newLabel();
-    std::string defaultLabel = end;
-    std::vector<std::pair<std::string, std::string>> cases;
-    for (size_t i = 1; i < node.kids.size(); ++i) {
-        const Node *child = node.kids[i].get();
-        if (!child || child->kind != NodeKind::Unsupported) continue;
-        const auto *u = static_cast<const Unsupported *>(child);
-        if (u->kind == UnsupKind::Default) {
-            defaultLabel = newLabel(); switchDefaults_[child] = defaultLabel;
-        } else if (u->kind == UnsupKind::Case && !u->kids.empty()) {
-            std::string literal = constantText(u->kids[0].get());
-            if (literal.empty()) { unsupported(u->loc, "case value must be a constant supported by the IR"); return; }
-            std::string label = newLabel(); switchLabels_[child] = label;
-            cases.emplace_back(literal, label);
-        }
-    }
-    for (const auto &entry : cases) {
-        IROperand c = emitConstant(value.type, entry.first);
-        IROperand eq = IROperand::temp(newTemp(), makeType(TypeKind::Int));
-        IRInstruction cmp; cmp.op = IROp::Compare; cmp.mnemonic = "eq"; cmp.type = value.type;
-        cmp.dest = eq; cmp.args = {value, c}; function_->body.push_back(cmp);
-        std::string next = newLabel(); emitBranch(eq, entry.second, next); emitLabel(next);
-    }
-    emitJump(defaultLabel);
-    breakTargets_.push_back(end);
-    for (size_t i = 1; i < node.kids.size(); ++i) lowerStatement(node.kids[i].get());
-    breakTargets_.pop_back(); emitLabel(end);
-    for (size_t i = 1; i < node.kids.size(); ++i) { switchLabels_.erase(node.kids[i].get()); switchDefaults_.erase(node.kids[i].get()); }
+IROperand IRGenerator::addressOf(const IROperand &variable) {
+    IRInstruction ins;
+    ins.op = IROp::Address;
+    ins.type = makePointer(variable.type);
+    ins.dest = IROperand::temp(newTemp(), ins.type);
+    ins.args = {variable};
+    function_->body.push_back(ins);
+    return ins.dest;
 }
 
+void IRGenerator::resetHistory() {
+    historyHeads_.clear();
+    historyPrologue_.clear();
+    localHistoryHeads_.clear();
+}
+
+// Each source declaration owns a head; local heads initialize at function entry.
+void IRGenerator::lowerHistory(const Unsupported &node) {
+    const auto *target = analyzer_->historyTarget(&node);
+    if (!target) { irError(node.loc, "snapshot target was not resolved"); return; }
+    auto storage = storageNames_.find(target->declaration);
+    std::string name = storage == storageNames_.end() ? localName(target->name) : storage->second;
+    auto &heads = target->persistent ? globalHistoryHeads_ : historyHeads_;
+    auto found = heads.find(target->declaration);
+    if (found == heads.end()) {
+        TypeRef headType = makePointer(makeType(TypeKind::Void));
+        std::string headName = target->persistent ? "__history." + name : declareLocal("__history");
+        IROperand head = IROperand::variable(headName, headType);
+        IRInstruction decl;
+        decl.op = target->persistent ? IROp::Global : IROp::Decl;
+        decl.type = headType;
+        decl.dest = head;
+        if (target->persistent) module_->globals.push_back(decl);
+        else {
+            historyPrologue_.push_back(decl);
+            IRInstruction zero;
+            zero.op = IROp::Const; zero.type = headType;
+            zero.dest = IROperand::temp(newTemp(), headType);
+            zero.args = {IROperand::literal("0", headType)};
+            historyPrologue_.push_back(zero);
+            IRInstruction copy;
+            copy.op = IROp::Copy; copy.dest = head; copy.args = {zero.dest};
+            historyPrologue_.push_back(copy);
+            localHistoryHeads_.push_back(head);
+        }
+        found = heads.emplace(target->declaration, head).first;
+    }
+    IROperand variable = IROperand::variable(name, lowerReferenceType(target->type));
+    IROperand address = target->type->kind == TypeKind::Reference ? variable : addressOf(variable);
+    long long bytes = analyzer_->sizeOfType(referencedType(target->type));
+    IROperand size = emitConstant(makeType(TypeKind::Int), std::to_string(bytes));
+    std::vector<IROperand> args{address, size, addressOf(found->second)};
+    if (node.kind == UnsupKind::Rewind)
+        args.push_back(node.kids.empty() ? emitConstant(makeType(TypeKind::Int), "1") : lowerExpression(node.kids[0].get()));
+    lowerRuntimeCall(node.kind == UnsupKind::Snapshot ? "__minerva_snapshot" : "__minerva_rewind",
+                     makeType(TypeKind::Void), args, false);
+}
+
+// Copy return values before draining local histories at one shared exit.
+void IRGenerator::finishHistory() {
+    if (failed_ || localHistoryHeads_.empty()) return;
+    std::string exit = newLabel();
+    IROperand result;
+    if (function_->returnType->kind != TypeKind::Void) {
+        result = IROperand::variable(declareLocal("__result"), function_->returnType);
+        IRInstruction decl;
+        decl.op = IROp::Decl; decl.type = result.type; decl.dest = result;
+        historyPrologue_.push_back(decl);
+    }
+    auto body = std::move(function_->body);
+    function_->body = historyPrologue_;
+    for (const auto &ins : body) {
+        if (ins.op != IROp::Return) { function_->body.push_back(ins); continue; }
+        if (!ins.args.empty()) emitCopy(result, ins.args[0]);
+        emitJump(exit);
+    }
+    emitLabel(exit);
+    for (const auto &head : localHistoryHeads_)
+        lowerRuntimeCall("__minerva_history_clear", makeType(TypeKind::Void), {addressOf(head)}, false);
+    IRInstruction ret;
+    ret.op = IROp::Return;
+    if (result.kind != IROperand::Kind::None) ret.args = {result};
+    function_->body.push_back(ret);
+}
+
+void IRGenerator::collectSwitchLabels(Node *node, IRInstruction &dispatch) {
+    if (!node) return;
+    if (node->kind == NodeKind::Unsupported) {
+        const auto &tag = *static_cast<const Unsupported *>(node);
+        if (tag.kind == UnsupKind::Switch || tag.kind == UnsupKind::Lambda) return;
+        if (tag.kind == UnsupKind::Case || tag.kind == UnsupKind::Default) {
+            std::string label = newLabel();
+            switchLabels_[node] = label;
+            if (tag.kind == UnsupKind::Default) dispatch.label = label;
+            else {
+                long long value;
+                if (!analyzer_->constantInteger(tag.kids[0].get(), &value)) {
+                    irError(tag.loc, "case label is not constant"); return;
+                }
+                if (dispatch.type->kind == TypeKind::Unsigned) value &= 4294967295LL;
+                dispatch.cases.push_back({value, label});
+            }
+        }
+    }
+    forEachChild(*node, [&](const Node *child) { collectSwitchLabels(const_cast<Node *>(child), dispatch); });
+}
+
+void IRGenerator::lowerSwitch(const Unsupported &node) {
+    IROperand value = lowerExpression(node.kids[0].get());
+    if (failed_) return;
+    std::string end = newLabel();
+    IRInstruction dispatch;
+    dispatch.op = IROp::Switch;
+    dispatch.type = value.type;
+    dispatch.args = {value};
+    dispatch.label = end;
+    for (size_t i = 1; i < node.kids.size(); ++i) collectSwitchLabels(node.kids[i].get(), dispatch);
+    if (failed_) return;
+    function_->body.push_back(dispatch);
+    breakTargets_.push_back(end);
+    for (size_t i = 1; i < node.kids.size(); ++i) lowerStatement(node.kids[i].get());
+    breakTargets_.pop_back();
+    emitLabel(end);
+}
+
+// Bind reference slots once and initialize statics at module scope.
 void IRGenerator::lowerDeclaration(const VarDecl &decl) {
-    TypeRef type = analyzer_->typeOfDecl(&decl);
+    TypeRef type = lowerReferenceType(analyzer_->typeOfDecl(&decl));
     if (!type) {
         irError(decl.loc, "no type was resolved for '" + decl.name + "'");
         return;
@@ -576,123 +639,102 @@ void IRGenerator::lowerDeclaration(const VarDecl &decl) {
                     "the variable '" + decl.name + "' has a type the IR cannot represent yet");
         return;
     }
+    if (decl.type.isStatic) {
+        std::string name = "__static." + declareLocal(decl.name);
+        scopes_.back()[decl.name] = name;
+        lowerGlobal(decl, name);
+        return;
+    }
     std::string name = declareLocal(decl.name);
     scopes_.back()[decl.name] = name;
+    storageNames_[&decl] = name;
     IRInstruction ins;
     ins.op = IROp::Decl;
     ins.type = type;
     ins.dest = IROperand::variable(name, type);
     function_->body.push_back(ins);
 
-    if (!decl.init) return;
-    if (decl.init->kind == NodeKind::StringLit && type->isArray() && type->sub && type->sub->kind == TypeKind::Char) {
-        const std::string &raw = static_cast<const Literal *>(decl.init.get())->text;
-        std::vector<unsigned char> bytes;
-        for (size_t i = 1; i + 1 < raw.size(); ++i) {
-            unsigned char ch = static_cast<unsigned char>(raw[i]);
-            if (ch == '\\' && i + 2 < raw.size()) {
-                char esc = raw[++i];
-                switch (esc) {
-                case 'n': ch = '\n'; break; case 't': ch = '\t'; break; case 'r': ch = '\r'; break;
-                case '0': ch = 0; break; case '\\': ch = '\\'; break; case '\"': ch = '\"'; break;
-                default: ch = static_cast<unsigned char>(esc); break;
-                }
-            }
-            bytes.push_back(ch);
-        }
-        bytes.push_back(0);
-        const size_t capacity = (!type->dims.empty() && type->dims[0] >= 0) ? static_cast<size_t>(type->dims[0]) : bytes.size();
-        if (bytes.size() > capacity) { unsupported(decl.init->loc, "string literal is too long for character array"); return; }
-        for (size_t i = 0; i < capacity; ++i) {
-            IROperand index = emitConstant(makeType(TypeKind::Int), std::to_string(i));
-            TypeRef ptrType = makePointer(type->sub);
-            IRInstruction address; address.op = IROp::ElementAddress; address.type = ptrType;
-            address.dest = IROperand::temp(newTemp(), ptrType); address.args = {IROperand::variable(name, type), index};
-            function_->body.push_back(address);
-            unsigned int value = i < bytes.size() ? bytes[i] : 0;
-            IROperand constant = emitConstant(makeType(TypeKind::Char), std::to_string(value));
-            IRInstruction store; store.op = IROp::Store; store.type = type->sub; store.args = {address.dest, constant};
-            function_->body.push_back(store);
-        }
+    TypeRef sourceType = analyzer_->typeOfDecl(&decl);
+    if (sourceType->kind == TypeKind::Reference) {
+        referenceTypes_[name] = referencedType(sourceType);
+        IROperand address = emitConvert(lowerAddress(decl.init.get()), type);
+        if (!failed_) emitCopy(ins.dest, address);
         return;
     }
-    if (decl.init->kind == NodeKind::InitList) {
-        if (!type->isArray()) {
-            unsupported(decl.init->loc, "initializer lists are supported only for arrays in this lowering");
-            return;
-        }
-        std::function<void(const InitList &, const IROperand &, TypeRef)> initializeArray;
-        initializeArray = [&](const InitList &list, const IROperand &base, TypeRef arrayType) {
-            if (failed_) return;
-            TypeRef elementType = arrayType->sub;
-            if (arrayType->dims.size() > 1) {
-                std::vector<long long> remaining(arrayType->dims.begin() + 1, arrayType->dims.end());
-                elementType = makeArray(arrayType->sub, remaining);
-            }
-            if (!arrayType->dims.empty() && arrayType->dims[0] >= 0 &&
-                list.elems.size() > static_cast<size_t>(arrayType->dims[0])) {
-                unsupported(list.loc, "too many array initializer elements"); return;
-            }
-            auto elementAddress = [&](size_t i) {
-                IROperand index = emitConstant(makeType(TypeKind::Int), std::to_string(i));
-                TypeRef ptrType = makePointer(elementType);
-                IRInstruction address; address.op = IROp::ElementAddress; address.type = ptrType;
-                address.dest = IROperand::temp(newTemp(), ptrType); address.args = {base, index};
-                function_->body.push_back(address);
-                return address.dest;
-            };
-            auto zeroInitialize = [&](auto &&self, const IROperand &where, TypeRef t) -> void {
-                if (failed_) return;
-                if (t && t->isArray()) {
-                    TypeRef child = t->sub;
-                    if (t->dims.size() > 1) child = makeArray(t->sub, std::vector<long long>(t->dims.begin()+1, t->dims.end()));
-                    if (t->dims.empty() || t->dims[0] < 0) return;
-                    for (long long j = 0; j < t->dims[0]; ++j) {
-                        IROperand ix = emitConstant(makeType(TypeKind::Int), std::to_string(j));
-                        TypeRef pt = makePointer(child);
-                        IRInstruction a; a.op = IROp::ElementAddress; a.type = pt;
-                        a.dest = IROperand::temp(newTemp(), pt); a.args = {where, ix};
-                        function_->body.push_back(a);
-                        self(self, a.dest, child);
-                    }
-                } else {
-                    IROperand zero = emitConstant(t, t && t->kind == TypeKind::Pointer ? "0" : "0");
-                    IRInstruction store; store.op = IROp::Store; store.type = t; store.args = {where, zero};
-                    function_->body.push_back(store);
-                }
-            };
-            for (size_t i = 0; i < list.elems.size(); ++i) {
-                IROperand elementAddressValue = elementAddress(i);
-                Node *entry = list.elems[i].get();
-                if (elementType->isArray()) {
-                    if (!entry || entry->kind != NodeKind::InitList) {
-                        unsupported(entry ? entry->loc : list.loc, "nested array elements require nested initializer lists"); return;
-                    }
-                    initializeArray(*static_cast<const InitList *>(entry), elementAddressValue, elementType);
-                } else {
-                    IROperand value = lowerExpression(entry);
-                    if (failed_) return;
-                    value = emitConvert(value, elementType);
-                    IRInstruction store; store.op = IROp::Store; store.type = elementType;
-                    store.args = {elementAddressValue, value}; function_->body.push_back(store);
-                }
-            }
-            // C-style aggregate initialization zero-fills omitted elements.
-            if (!arrayType->dims.empty() && arrayType->dims[0] >= 0) {
-                for (size_t i = list.elems.size(); i < static_cast<size_t>(arrayType->dims[0]); ++i) {
-                    IROperand elementAddressValue = elementAddress(i);
-                    zeroInitialize(zeroInitialize, elementAddressValue, elementType);
-                }
-            }
-        };
-        initializeArray(*static_cast<const InitList *>(decl.init.get()),
-                        IROperand::variable(name, type), type);
+    if (!decl.init) return;
+    if (type->isArray() || decl.init->kind == NodeKind::InitList) {
+        IRInstruction address;
+        address.op = IROp::Address;
+        address.type = makePointer(type);
+        address.dest = IROperand::temp(newTemp(), address.type);
+        address.args = {ins.dest};
+        function_->body.push_back(address);
+        lowerInitializer(decl.init.get(), type, address.dest, 0, false);
         return;
     }
     IROperand value = lowerExpression(decl.init.get());
     if (failed_) return;
     value = emitConvert(value, type);
     emitCopy(IROperand::variable(name, type), value);
+}
+
+void IRGenerator::initializeLeaf(const IROperand &base, long long offset, TypeRef type,
+                                 const IROperand &value, bool global) {
+    IRInstruction ins;
+    ins.type = type;
+    if (global) {
+        ins.op = IROp::Data;
+        ins.args = {base, IROperand::literal(std::to_string(offset), makeType(TypeKind::Int)), value};
+        module_->globals.push_back(ins);
+        return;
+    }
+    IRInstruction address;
+    address.op = IROp::ByteAddress;
+    address.type = makePointer(type);
+    address.dest = IROperand::temp(newTemp(), address.type);
+    address.args = {base, IROperand::literal(std::to_string(offset), makeType(TypeKind::Int))};
+    function_->body.push_back(address);
+    ins.op = IROp::Store;
+    ins.args = {address.dest, value};
+    function_->body.push_back(ins);
+}
+
+// Flatten explicit leaves by byte offset; omitted global storage is already zero.
+void IRGenerator::lowerInitializer(Node *node, TypeRef type, const IROperand &base, long long offset, bool global) {
+    if (failed_) return;
+    if (node && node->kind == NodeKind::StringLit && type->isArray()) {
+        auto bytes = decodeLiteralBytes(static_cast<const Literal *>(node)->text);
+        long long count = global ? static_cast<long long>(bytes.size()) : type->dims[0];
+        for (long long i = 0; i < count; ++i) {
+            std::string text = std::to_string(i < static_cast<long long>(bytes.size()) ? bytes[i] : 0);
+            IROperand value = global ? IROperand::literal(text, type->sub) : emitConstant(type->sub, text);
+            initializeLeaf(base, offset + i, type->sub, value, global);
+        }
+        return;
+    }
+    if (!node || node->kind == NodeKind::InitList) {
+        long long count = initializerCount(type, module_->layouts);
+        if (count >= 0) {
+            const auto *list = node ? static_cast<const InitList *>(node) : nullptr;
+            if (global) count = list ? static_cast<long long>(list->elems.size()) : 0;
+            for (long long i = 0; i < count; ++i) {
+                FieldLayout child = initializerElement(type, i, module_->layouts);
+                Node *entry = list && i < static_cast<long long>(list->elems.size()) ? list->elems[i].get() : nullptr;
+                lowerInitializer(entry, child.type, base, offset + child.offset, global);
+            }
+            return;
+        }
+    }
+    if (global) {
+        std::string text;
+        if (!analyzer_->constantScalar(node, type, &text)) {
+            unsupported(node ? node->loc : SrcLoc{}, "global initializer leaf must be constant"); return;
+        }
+        initializeLeaf(base, offset, type, IROperand::literal(text, type), true);
+    } else {
+        IROperand value = node ? emitConvert(lowerExpression(node), type) : emitConstant(type, "0");
+        if (!failed_) initializeLeaf(base, offset, type, value, false);
+    }
 }
 
 IROperand IRGenerator::lowerArrayDecay(Node *node) {
@@ -715,19 +757,29 @@ IROperand IRGenerator::lowerArrayDecay(Node *node) {
     function_->body.push_back(decay); return decay.dest;
 }
 
+// Resolve each lvalue to its actual storage address.
 IROperand IRGenerator::lowerAddress(Node *node) {
     if (!node || failed_) return IROperand();
     TypeRef valueType = typeOfExpression(node);
     if (!valueType) { irError(node->loc, "no type was resolved for addressable expression"); return IROperand(); }
+    if (node->kind == NodeKind::Call) {
+        ExprInfo info;
+        if (analyzer_->expressionInfo(node, &info) && info.category == ExprCategory::LValue)
+            return lowerCall(*static_cast<const Call *>(node), true);
+    }
     if (node->kind == NodeKind::Ident) {
         const Ident &id = *static_cast<const Ident *>(node);
+        std::string name = localName(id.name);
+        auto reference = referenceTypes_.find(name);
+        if (reference != referenceTypes_.end())
+            return IROperand::variable(name, makePointer(lowerReferenceType(reference->second)));
         TypeRef memberType; size_t fieldIndex = 0;
         if (!currentMethodClass_.empty() && localName(id.name) == id.name &&
             analyzer_->unqualifiedMemberInfo(currentMethodClass_, id.name, &memberType, &fieldIndex)) {
             IROperand base = IROperand::variable(localName("this"), makePointer(makeAggregate(currentMethodClass_)));
             IROperand index = emitConstant(makeType(TypeKind::Int), std::to_string(fieldIndex));
-            TypeRef pointerType = makePointer(memberType);
-            IRInstruction address; address.op = IROp::ElementAddress; address.type = pointerType;
+            TypeRef pointerType = makePointer(lowerReferenceType(memberType));
+            IRInstruction address; address.op = IROp::ByteAddress; address.type = pointerType;
             address.dest = IROperand::temp(newTemp(), pointerType); address.args = {base, index};
             function_->body.push_back(address); return address.dest;
         }
@@ -760,8 +812,8 @@ IROperand IRGenerator::lowerAddress(Node *node) {
         IROperand base = arrow ? lowerExpression(member.kids[0].get()) : lowerAddress(member.kids[0].get());
         if (failed_) return IROperand();
         IROperand index = emitConstant(makeType(TypeKind::Int), std::to_string(fieldIndex));
-        TypeRef pointerType = makePointer(fieldType);
-        IRInstruction ins; ins.op = IROp::ElementAddress; ins.type = pointerType;
+        TypeRef pointerType = makePointer(lowerReferenceType(fieldType));
+        IRInstruction ins; ins.op = IROp::ByteAddress; ins.type = pointerType;
         ins.dest = IROperand::temp(newTemp(), pointerType); ins.args = {base, index};
         function_->body.push_back(ins); return ins.dest;
     }
@@ -784,18 +836,24 @@ IROperand IRGenerator::lowerAddress(Node *node) {
     return IROperand();
 }
 
+// Lower expression values after semantic checking.
 IROperand IRGenerator::lowerExpression(Node *node) {
     if (!node || failed_) return IROperand();
     switch (node->kind) {
-    case NodeKind::IntLit:
-        return emitConstant(makeType(TypeKind::Int),
-                            static_cast<const Literal *>(node)->text);
+    case NodeKind::IntLit: {
+        long long value = 0;
+        if (!integerLiteralValue(static_cast<const Literal *>(node)->text, &value)) {
+            irError(node->loc, "integer literal is outside the supported range"); return IROperand();
+        }
+        return emitConstant(makeType(TypeKind::Int), std::to_string(value));
+    }
     case NodeKind::FloatLit:
         return emitConstant(makeType(TypeKind::Float),
                             static_cast<const Literal *>(node)->text);
-    case NodeKind::CharLit:
-        return emitConstant(makeType(TypeKind::Char),
-                            static_cast<const Literal *>(node)->text);
+    case NodeKind::CharLit: {
+        auto bytes = decodeLiteralBytes(static_cast<const Literal *>(node)->text);
+        return emitConstant(makeType(TypeKind::Char), std::to_string(bytes.empty() ? 0 : bytes[0]));
+    }
     case NodeKind::StringLit:
         unsupported(node->loc, "string literals are supported as printf/scanf format operands only");
         return IROperand();
@@ -872,11 +930,11 @@ IROperand IRGenerator::lowerExpression(Node *node) {
             TypeRef signature = analyzer_->lambdaType(&u);
             std::string name = analyzer_->lambdaName(&u);
             if (!signature || name.empty()) { irError(node->loc, "no resolved lambda signature"); return IROperand(); }
-            IROperand value = IROperand::function(name); value.type = makePointer(signature); return value;
+            IROperand value = IROperand::function(name); value.type = makePointer(lowerReferenceType(signature)); return value;
         }
         if (u.kind == UnsupKind::New) {
             if (!u.kids.empty()) { unsupported(node->loc, "constructors are not implemented; new supports default allocation only"); return IROperand(); }
-            TypeRef objectType = makeAggregate(u.name);
+            TypeRef objectType = typeOfExpression(node)->sub;
             long long bytes = analyzer_->sizeOfType(objectType);
             if (bytes <= 0) { unsupported(node->loc, "cannot allocate an incomplete or zero-sized type '" + u.name + "'"); return IROperand(); }
             IROperand size = emitConstant(makeType(TypeKind::Int), std::to_string(bytes));
@@ -905,11 +963,8 @@ IROperand IRGenerator::lowerExpression(Node *node) {
             return emitConvert(value, typeOfExpression(node));
         }
         if (u.kind == UnsupKind::Sizeof) {
-            TypeRef measured;
-            if (!u.kids.empty() && u.kids[0]) measured = typeOfExpression(u.kids[0].get());
-            else if (u.what.find("sizeof-type ") == 0)
-                measured = simpleTypeSpelling(u.what.substr(std::string("sizeof-type ").size()));
-            long long size = analyzer_->sizeOfType(measured);
+            long long size;
+            if (!analyzer_->constantInteger(node, &size)) { irError(node->loc, "sizeof has no resolved size"); return IROperand(); }
             return emitConstant(makeType(TypeKind::Int), std::to_string(size));
         }
         if (u.kind == UnsupKind::Swap) {
@@ -954,11 +1009,23 @@ IROperand IRGenerator::lowerExpression(Node *node) {
     }
 }
 
+// Read reference names through their saved address.
 IROperand IRGenerator::lowerIdentifier(const Ident &node) {
     TypeRef type = typeOfExpression(&node);
     if (!type) {
         irError(node.loc, "no type was resolved for '" + node.name + "'");
         return IROperand();
+    }
+    auto reference = referenceTypes_.find(localName(node.name));
+    if (reference != referenceTypes_.end()) {
+        if (type->isArray()) return lowerArrayDecay(const_cast<Ident *>(&node));
+        IRInstruction load;
+        load.op = IROp::Load;
+        load.type = type;
+        load.dest = IROperand::temp(newTemp(), type);
+        load.args = {lowerAddress(const_cast<Ident *>(&node))};
+        function_->body.push_back(load);
+        return load.dest;
     }
     long long enumValue = 0; ExprInfo expression;
     if (analyzer_->enumConstant(node.name, &enumValue) && analyzer_->expressionInfo(&node, &expression) &&
@@ -970,8 +1037,8 @@ IROperand IRGenerator::lowerIdentifier(const Ident &node) {
         if (fieldType->isArray()) return lowerArrayDecay(const_cast<Ident *>(&node));
         IROperand address = lowerAddress(const_cast<Ident *>(&node));
         if (failed_) return IROperand();
-        IRInstruction load; load.op = IROp::Load; load.type = fieldType;
-        load.dest = IROperand::temp(newTemp(), fieldType); load.args = {address};
+        IRInstruction load; load.op = IROp::Load; load.type = lowerReferenceType(fieldType);
+        load.dest = IROperand::temp(newTemp(), load.type); load.args = {address};
         function_->body.push_back(load); return load.dest;
     }
     if (type->isArray()) return lowerArrayDecay(const_cast<Ident *>(&node));
@@ -983,6 +1050,7 @@ IROperand IRGenerator::lowerIdentifier(const Ident &node) {
     return IROperand::variable(localName(node.name), type);
 }
 
+// Update referenced lvalues through their addresses.
 IROperand IRGenerator::lowerUnary(const Unary &node) {
     const std::string &op = node.op;
     if (op == "&") return lowerAddress(node.operand.get());
@@ -997,7 +1065,8 @@ IROperand IRGenerator::lowerUnary(const Unary &node) {
     if (op == "++" || op == "--") {
         TypeRef targetType = typeOfExpression(node.operand.get());
         if (!targetType) { irError(node.loc, "no type for increment/decrement operand"); return IROperand(); }
-        if (node.operand && node.operand->kind == NodeKind::Ident) {
+        if (node.operand && node.operand->kind == NodeKind::Ident &&
+            !referenceTypes_.count(localName(static_cast<const Ident *>(node.operand.get())->name))) {
             IROperand target = lowerExpression(node.operand.get());
             if (failed_) return IROperand();
             if (target.kind == IROperand::Kind::Variable) return emitStep(target, op == "++", false);
@@ -1048,7 +1117,7 @@ IROperand IRGenerator::lowerUnary(const Unary &node) {
         IRInstruction ins;
         ins.op = IROp::Unary;
         ins.mnemonic = "not";
-        ins.type = operand.type;
+        ins.type = makeType(TypeKind::Int);
         ins.dest = IROperand::temp(newTemp(), makeType(TypeKind::Int));
         ins.args.push_back(operand);
         function_->body.push_back(ins);
@@ -1070,7 +1139,8 @@ IROperand IRGenerator::lowerUnary(const Unary &node) {
 }
 
 IROperand IRGenerator::lowerPostfix(const Postfix &node) {
-    if (node.operand && node.operand->kind == NodeKind::Ident) {
+    if (node.operand && node.operand->kind == NodeKind::Ident &&
+            !referenceTypes_.count(localName(static_cast<const Ident *>(node.operand.get())->name))) {
         IROperand target = lowerExpression(node.operand.get());
         if (failed_) return IROperand();
         if (target.kind == IROperand::Kind::Variable) return emitStep(target, node.op == "++", true);
@@ -1098,6 +1168,7 @@ IROperand IRGenerator::lowerPostfix(const Postfix &node) {
     return oldValue;
 }
 
+// Preserve short-circuit control flow and pointer arithmetic.
 IROperand IRGenerator::lowerBinary(const Binary &node) {
     const std::string &op = node.op;
     if (op == ",") {
@@ -1200,8 +1271,10 @@ IROperand IRGenerator::lowerBinary(const Binary &node) {
     return emitBinary(result, arithmeticMnemonic(op), lhs, rhs);
 }
 
+// Distinguish direct variables from indirect assignment targets.
 IROperand IRGenerator::lowerAssign(const Assign &node) {
     bool direct = node.lhs && node.lhs->kind == NodeKind::Ident;
+    if (direct && referenceTypes_.count(localName(static_cast<const Ident *>(node.lhs.get())->name))) direct = false;
     if (direct && !currentMethodClass_.empty()) {
         const Ident &id = *static_cast<const Ident *>(node.lhs.get());
         TypeRef memberType; size_t memberIndex = 0;
@@ -1265,89 +1338,69 @@ IROperand IRGenerator::lowerRuntimeCall(const std::string &name, TypeRef result,
     return call.dest;
 }
 
-IROperand IRGenerator::lowerCall(const Call &node) {
+IROperand IRGenerator::lowerCallArgument(Node *node, TypeRef expected) {
+    IROperand value = expected->kind == TypeKind::Reference ? lowerAddress(node) : lowerExpression(node);
+    return emitConvert(value, lowerReferenceType(expected));
+}
+
+IROperand IRGenerator::emitFunctionCall(IROperand callee, TypeRef signature,
+                                      const std::vector<IROperand> &args, bool addressOnly) {
+    callee.type = makePointer(lowerReferenceType(signature));
+    IRInstruction call;
+    call.op = IROp::Call;
+    call.type = lowerReferenceType(signature->ret);
+    call.args = {callee};
+    call.args.insert(call.args.end(), args.begin(), args.end());
+    if (call.type->kind != TypeKind::Void) call.dest = IROperand::temp(newTemp(), call.type);
+    function_->body.push_back(call);
+    if (signature->ret->kind != TypeKind::Reference || addressOnly) return call.dest;
+    IRInstruction load;
+    load.op = IROp::Load;
+    load.type = lowerReferenceType(referencedType(signature->ret));
+    load.dest = IROperand::temp(newTemp(), load.type);
+    load.args = {call.dest};
+    function_->body.push_back(load);
+    return load.dest;
+}
+
+// Use source signatures to pass reference arguments as addresses, then erase references.
+IROperand IRGenerator::lowerCall(const Call &node, bool addressOnly) {
     if (!node.callee) { irError(node.loc, "call has no callee"); return IROperand(); }
+    TypeRef signature;
+    std::string qualified;
+    IROperand object;
     if (node.callee->kind == NodeKind::Ident && !currentMethodClass_.empty()) {
-        const Ident &methodIdent = *static_cast<const Ident *>(node.callee.get());
-        TypeRef callType, implementationType; std::string qualifiedName;
-        if (analyzer_->methodInfo(makeAggregate(currentMethodClass_), false, methodIdent.name,
-                                  &callType, &implementationType, &qualifiedName)) {
-            IROperand object = IROperand::variable(localName("this"), makePointer(makeAggregate(currentMethodClass_)));
-            IROperand callee = IROperand::function(qualifiedName); callee.type = makePointer(implementationType);
-            std::vector<IROperand> args{object};
-            for (const auto &arg : node.args) {
-                IROperand value = lowerExpression(arg.get());
-                if (failed_) return IROperand();
-                args.push_back(value);
-            }
-            for (size_t i = 0; i < args.size() && i < implementationType->params.size(); ++i)
-                args[i] = emitConvert(args[i], implementationType->params[i]);
-            IRInstruction call; call.op = IROp::Call; call.type = implementationType->ret;
-            call.args.push_back(callee); call.args.insert(call.args.end(), args.begin(), args.end());
-            if (call.type && call.type->kind != TypeKind::Void) call.dest = IROperand::temp(newTemp(), call.type);
-            function_->body.push_back(call); return call.dest;
-        }
-    }
-    if (node.callee->kind == NodeKind::Unsupported &&
-        static_cast<const Unsupported *>(node.callee.get())->kind == UnsupKind::Member) {
-        const Unsupported &member = *static_cast<const Unsupported *>(node.callee.get());
-        if (!member.kids.empty() && member.kids[0]) {
+        const auto &ident = *static_cast<const Ident *>(node.callee.get());
+        if (analyzer_->methodInfo(makeAggregate(currentMethodClass_), false, ident.name, nullptr, &signature, &qualified))
+            object = IROperand::variable(localName("this"), makePointer(makeAggregate(currentMethodClass_)));
+    } else if (node.callee->kind == NodeKind::Unsupported) {
+        const auto &member = *static_cast<const Unsupported *>(node.callee.get());
+        if (member.kind == UnsupKind::Member && !member.kids.empty()) {
             bool arrow = member.what.find("member ->") == 0;
-            TypeRef callType, implementationType; std::string qualifiedName;
-            TypeRef baseType = typeOfExpression(member.kids[0].get());
-            if (analyzer_->methodInfo(baseType, arrow, member.name, &callType, &implementationType, &qualifiedName)) {
-                IROperand object = arrow ? lowerExpression(member.kids[0].get()) : lowerAddress(member.kids[0].get());
-                if (failed_) return IROperand();
-                IROperand callee = IROperand::function(qualifiedName);
-                callee.type = makePointer(implementationType);
-                std::vector<IROperand> args{object};
-                for (const auto &arg : node.args) {
-                    IROperand value = lowerExpression(arg.get());
-                    if (failed_) return IROperand();
-                    args.push_back(value);
-                }
-                for (size_t i = 0; i < args.size() && i < implementationType->params.size(); ++i)
-                    args[i] = emitConvert(args[i], implementationType->params[i]);
-                IRInstruction call; call.op = IROp::Call; call.type = implementationType->ret;
-                call.args.push_back(callee); call.args.insert(call.args.end(), args.begin(), args.end());
-                if (call.type && call.type->kind != TypeKind::Void) call.dest = IROperand::temp(newTemp(), call.type);
-                function_->body.push_back(call); return call.dest;
-            }
+            if (analyzer_->methodInfo(typeOfExpression(member.kids[0].get()), arrow, member.name,
+                                      nullptr, &signature, &qualified))
+                object = arrow ? lowerExpression(member.kids[0].get()) : lowerAddress(member.kids[0].get());
         }
     }
-    TypeRef rawType = typeOfExpression(node.callee.get());
-    bool direct = rawType && rawType->kind == TypeKind::Function && node.callee->kind == NodeKind::Ident;
-    TypeRef functionType = callableType(rawType);
-    if (!functionType) {
-        unsupported(node.loc, "callee is not a representable function or function pointer");
-        return IROperand();
-    }
-
-    IROperand calleeOperand;
-    if (direct) {
-        calleeOperand = IROperand::function(static_cast<const Ident *>(node.callee.get())->name);
-    } else {
-        calleeOperand = lowerExpression(node.callee.get());
+    if (signature) {
+        std::vector<IROperand> args{emitConvert(object, lowerReferenceType(signature->params[0]))};
+        for (size_t i = 0; i < node.args.size(); ++i)
+            args.push_back(lowerCallArgument(node.args[i].get(), signature->params[i + 1]));
         if (failed_) return IROperand();
+        return emitFunctionCall(IROperand::function(qualified), signature, args, addressOnly);
     }
-
+    ExprInfo calleeInfo;
+    if (!analyzer_->expressionInfo(node.callee.get(), &calleeInfo) || !(signature = callableType(calleeInfo.type))) {
+        unsupported(node.loc, "callee is not a representable function or function pointer"); return IROperand();
+    }
+    bool direct = calleeInfo.type->kind == TypeKind::Function && node.callee->kind == NodeKind::Ident;
+    IROperand callee = direct ? IROperand::function(static_cast<const Ident *>(node.callee.get())->name)
+                             : lowerExpression(node.callee.get());
     std::vector<IROperand> args;
-    for (const auto &arg : node.args) {
-        IROperand value = lowerExpression(arg.get());
-        if (failed_) return IROperand();
-        args.push_back(value);
-    }
-    for (size_t i = 0; i < args.size() && i < functionType->params.size(); i++)
-        args[i] = emitConvert(args[i], functionType->params[i]);
-
-    IRInstruction ins;
-    ins.op = IROp::Call;
-    ins.type = functionType->ret ? functionType->ret : makeType(TypeKind::Void);
-    ins.args.push_back(calleeOperand);
-    for (const IROperand &arg : args) ins.args.push_back(arg);
-    if (ins.type->kind != TypeKind::Void) ins.dest = IROperand::temp(newTemp(), ins.type);
-    function_->body.push_back(ins);
-    return ins.dest;
+    for (size_t i = 0; i < node.args.size(); ++i)
+        args.push_back(lowerCallArgument(node.args[i].get(), signature->params[i]));
+    if (failed_) return IROperand();
+    return emitFunctionCall(callee, signature, args, addressOnly);
 }
 
 IROperand IRGenerator::emitConstant(TypeRef type, const std::string &text) {
@@ -1361,6 +1414,7 @@ IROperand IRGenerator::emitConstant(TypeRef type, const std::string &text) {
 }
 
 IROperand IRGenerator::emitConvert(const IROperand &value, TypeRef target) {
+    target = lowerReferenceType(target);
     if (!target || !value.type) return value;
     if (value.type->kind == TypeKind::Unknown) return value;
     if (sameType(value.type, target)) return value;

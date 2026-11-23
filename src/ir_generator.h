@@ -20,11 +20,17 @@ private:
     void unsupported(const SrcLoc &loc, const std::string &message);
     void irError(const SrcLoc &loc, const std::string &message);
 
-    bool lowerGlobal(const VarDecl &decl);
+    bool lowerGlobal(const VarDecl &decl, const std::string &name = "");
     bool lowerFunction(const FuncDef &fn);
     bool lowerLambda(const Unsupported &lambda);
     void lowerStatement(Node *node);
     void lowerDeclaration(const VarDecl &decl);
+    void lowerInitializer(Node *node, TypeRef type, const IROperand &base, long long offset, bool global);
+    void initializeLeaf(const IROperand &base, long long offset, TypeRef type, const IROperand &value, bool global);
+    IROperand addressOf(const IROperand &variable);
+    void lowerHistory(const Unsupported &node);
+    void resetHistory();
+    void finishHistory();
     IROperand lowerExpression(Node *node);
     IROperand lowerAddress(Node *node);
     IROperand lowerArrayDecay(Node *node);
@@ -33,7 +39,9 @@ private:
     IROperand lowerPostfix(const Postfix &node);
     IROperand lowerBinary(const Binary &node);
     IROperand lowerAssign(const Assign &node);
-    IROperand lowerCall(const Call &node);
+    IROperand lowerCall(const Call &node, bool addressOnly = false);
+    IROperand lowerCallArgument(Node *node, TypeRef expected);
+    IROperand emitFunctionCall(IROperand callee, TypeRef signature, const std::vector<IROperand> &args, bool addressOnly);
     IROperand lowerRuntimeCall(const std::string &name, TypeRef result, const std::vector<IROperand> &args, bool keepResult);
 
     IROperand emitConstant(TypeRef type, const std::string &text);
@@ -53,6 +61,7 @@ private:
     void emitBranch(const IROperand &condition, const std::string &yes, const std::string &no);
     void collectUserLabels(const Node *node);
     void lowerSwitch(const Unsupported &node);
+    void collectSwitchLabels(Node *node, IRInstruction &dispatch);
 
     const Analyzer *analyzer_ = nullptr;
     IRModule *module_ = nullptr;
@@ -66,8 +75,14 @@ private:
     std::vector<std::string> breakTargets_;
     std::unordered_map<std::string, std::string> userLabels_;
     std::unordered_map<const Node *, std::string> switchLabels_;
-    std::unordered_map<const Node *, std::string> switchDefaults_;
     std::vector<Diagnostic> diagnostics_;
     bool failed_ = false;
     std::string currentMethodClass_;
+    std::unordered_map<std::string, TypeRef> referenceTypes_;
+    TypeRef sourceReturnType_;
+    std::unordered_map<const Node *, std::string> storageNames_;
+    std::unordered_map<const Node *, IROperand> historyHeads_;
+    std::unordered_map<const Node *, IROperand> globalHistoryHeads_;
+    std::vector<IRInstruction> historyPrologue_;
+    std::vector<IROperand> localHistoryHeads_;
 };
