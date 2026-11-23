@@ -1,0 +1,41 @@
+struct Packet { char tag; short code; int values[2]; };
+struct Packet adjust(struct Packet value, int amount) {
+    value.values[0] += amount;
+    value.tag = 'z';
+    return value;
+}
+struct Packet recurse(struct Packet value, int count) {
+    if (count <= 0) return value;
+    return recurse(adjust(value, 1), count - 1);
+}
+int visits(int depth) {
+    static int count;
+    count++;
+    if (depth > 0) return visits(depth - 1);
+    return count;
+}
+class Box {
+public:
+    struct Packet stored;
+    struct Packet get() { return stored; }
+};
+int main() {
+    struct Packet original = {'a', 2, {3, 4}};
+    struct Packet copy = original;
+    copy = copy;
+    struct Packet changed = adjust(copy, 5);
+    struct Packet *pointer = &copy;
+    *pointer = changed;
+    struct Packet loaded = *pointer;
+    struct Packet nested = recurse(original, 2);
+    struct Packet (*builder)(struct Packet, int) = adjust;
+    struct Packet indirect = builder(original, 6);
+    Box box;
+    box.stored = original;
+    struct Packet fromMethod = box.get();
+    return original.tag == 'a' && original.code == 2 && original.values[0] == 3 &&
+        original.values[1] == 4 && copy.tag == 'z' && copy.values[0] == 8 &&
+        loaded.values[0] == 8 && loaded.values[1] == 4 && nested.values[0] == 5 &&
+        indirect.values[0] == 9 && fromMethod.values[0] == 3 &&
+        visits(2) == 3 && visits(0) == 4 ? 0 : 1;
+}
