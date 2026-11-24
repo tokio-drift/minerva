@@ -2,7 +2,7 @@
 #include <string>
 #include <cstdlib>
 #include "parser.tab.h"
-#include "frontend.h"
+#include "include/frontend.h"
 
 using namespace std;
 

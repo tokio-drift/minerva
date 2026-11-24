@@ -1,4 +1,5 @@
-#include "ir.h"
+#include "include/ir.h"
+#include <algorithm>
 #include <sstream>
 
 namespace {
@@ -6,15 +7,33 @@ namespace {
 class Runtime {
     std::ostringstream out;
     std::string name;
+    std::vector<std::string> needed;
+    bool active = false, leaf = false;
+
+    bool has(const std::string &helper) const {
+        return std::find(needed.begin(), needed.end(), helper) != needed.end();
+    }
+
+    void require(const std::string &helper) {
+        if (!has(helper)) needed.push_back(helper);
+    }
 public:
-    Runtime() {
-        out << R"(.data
-.align 2
-__mv_rt_free_head: .word 0
-__mv_rt_pushback: .word -2
-__mv_rt_input_byte: .space 1
-__mv_rt_format_message: .asciiz "minerva: unsupported format\n"
-.text
+    // Include only helpers called by this program or another selected helper.
+    Runtime(const std::vector<std::string> &helpers) : needed(helpers) {
+        if (has("printf"))
+            for (const auto &type : {"int", "uint", "float", "char", "string"}) require("print_" + std::string(type));
+        if (has("scanf"))
+            for (const auto &helper : {"read_int", "read_float", "read_string", "getchar", "skip_space"}) require(helper);
+        if (has("snapshot")) { require("malloc"); require("copy"); }
+        if (has("rewind")) { require("free"); require("copy"); }
+        if (has("history_clear")) require("free");
+        out << ".data\n.align 2\n";
+        if (has("malloc") || has("free")) out << "__mv_rt_free_head: .word 0\n";
+        if (has("getchar")) out << "__mv_rt_pushback: .word -2\n__mv_rt_input_byte: .space 1\n";
+        if (has("printf") || has("scanf"))
+            out << "__mv_rt_format_message: .asciiz \"minerva: unsupported format\\n\"\n";
+        out << ".text\n";
+        if (has("printf") || has("scanf")) out << R"(
 __mv_rt_format_error:
     la $a0, __mv_rt_format_message
     li $v0, 4
@@ -25,17 +44,25 @@ __mv_rt_format_error:
 )";
     }
 
-    void begin(const std::string &suffix) {
+    void begin(const std::string &suffix, bool isLeaf = false) {
+        active = has(suffix); leaf = isLeaf;
+        if (!active) return;
         name = "__mv_rt_" + suffix;
-        out << name << ":\n    addiu $sp, $sp, -64\n    sw $fp, 56($sp)\n"
+        out << name << ":\n";
+        if (leaf) return;
+        out << "    addiu $sp, $sp, -64\n    sw $fp, 56($sp)\n"
             << "    sw $ra, 60($sp)\n    move $fp, $sp\n";
         for (int i = 0; i < 8; ++i) out << "    sw $s" << i << ", " << i * 4 << "($fp)\n";
     }
 
-    void arg(const std::string &reg, int index) { out << "    lw " << reg << ", " << 64 + index * 4 << "($fp)\n"; }
-    void code(const std::string &body) { out << body; }
+    void arg(const std::string &reg, int index) {
+        if (active) out << "    lw " << reg << ", " << (leaf ? 0 : 64) + index * 4 << (leaf ? "($sp)\n" : "($fp)\n");
+    }
+    void code(const std::string &body) { if (active) out << body; }
 
     void end() {
+        if (!active) return;
+        if (leaf) { out << "    jr $ra\n    nop\n"; return; }
         out << name << "_return:\n";
         for (int i = 0; i < 8; ++i) out << "    lw $s" << i << ", " << i * 4 << "($fp)\n";
         out << "    lw $ra, 60($fp)\n    lw $t9, 56($fp)\n    addiu $sp, $fp, 64\n"
@@ -50,7 +77,7 @@ void emitPrinting(Runtime &r) {
     const char *names[] = {"int", "float", "char", "string"};
     int services[] = {1, 2, 11, 4};
     for (int i = 0; i < 4; ++i) {
-        r.begin(std::string("print_") + names[i]); r.arg("$t0", 0);
+        r.begin(std::string("print_") + names[i], true); r.arg("$t0", 0);
         r.code(i == 1 ? "    mtc1 $t0, $f12\n" : "    move $a0, $t0\n");
         r.code("    li $v0, " + std::to_string(services[i]) + "\n    syscall\n    move $v0, $zero\n");
         r.end();
@@ -678,8 +705,9 @@ __mv_rt_scanf_done:
 
 }
 
-std::string emitMIPSRuntime() {
-    Runtime runtime;
+std::string emitMIPSRuntime(const std::vector<std::string> &helpers) {
+    if (helpers.empty()) return "";
+    Runtime runtime(helpers);
     emitPrinting(runtime);
     emitPrintf(runtime);
     emitAllocator(runtime);

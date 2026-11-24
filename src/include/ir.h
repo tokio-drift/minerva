@@ -63,4 +63,4 @@ bool parseIR(const std::string &text, IRModule *module, std::vector<std::string>
 bool verifyIR(const IRModule &module, std::vector<std::string> *errors);
 bool optimizeIR(IRModule *module, std::vector<std::string> *errors);
 bool generateMIPS(const IRModule &module, std::string *assembly, std::vector<std::string> *errors);
-std::string emitMIPSRuntime();
+std::string emitMIPSRuntime(const std::vector<std::string> &helpers);

@@ -9,14 +9,15 @@
 #include <vector>
 
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
-#include "ast.h"
-#include "frontend.h"
-#include "ir.h"
-#include "ir_generator.h"
+#include "include/ast.h"
+#include "include/frontend.h"
+#include "include/ir.h"
+#include "include/ir_generator.h"
 #include "parser.tab.h"
-#include "semantic.h"
+#include "include/semantic.h"
 
 std::vector<TokEntry> g_tokens;
 std::vector<ErrEntry> g_errors;
@@ -28,7 +29,7 @@ extern FILE *yyin;
 int yyparse(void);
 int yylex_destroy(void);
 
-enum class Stage { Unset, Lex, Ast, TypedAst, Semantic, IR, MIPS, VerifyIR, Help };
+enum class Stage { Unset, Run, Lex, Ast, TypedAst, Semantic, IR, MIPS, VerifyIR, Help };
 
 struct Options {
     Stage stage = Stage::Unset;
@@ -36,15 +37,17 @@ struct Options {
     std::string output;
     bool optimizationSet = false;
     int optimization = 0;
+    std::vector<std::string> arguments;
 };
 
 static void usage(const char *prog, std::ostream &out) {
-    out << "Usage: " << prog << " [STAGE] <source-file> [-o <path>|-o -] [-O0|-O1]\n"
+    out << "Usage: " << prog << " [STAGE] <source-file> [-o <path>|-o -] [-O0|-O1] [-- args...]\n"
         << "       " << prog << " --verify-ir <file.ir>\n"
         << "       " << prog << " --help\n\n"
-        << "Stages: --lex, --ast, --typed-ast, --semantic, --ir, --mips\n"
+        << "Stages: --run, --lex, --ast, --typed-ast, --semantic, --ir, --mips\n"
         << "Aliases: --dump-ast, --dump-typed-ast\n"
-        << "Default: --lex; with -o and no stage: --ir. Output defaults to stdout.\n"
+        << "Default: compile and run through SPIM; with -o and no stage: --ir.\n"
+        << "--run prints program output, forwards stdin/args and returns the program's exit status.\n"
         << "Output: -o path, -opath, or -o - for stdout, for any compilation stage.\n"
         << "Optimization: -O0 (default), -O1 for IR/MIPS; local integer folding and temporary propagation.\n"
         << "MIPS target: SPIM; output includes the required runtime helpers.\n"
@@ -52,6 +55,7 @@ static void usage(const char *prog, std::ostream &out) {
 }
 
 static Stage namedStage(const std::string &arg) {
+    if (arg == "--run") return Stage::Run;
     if (arg == "--lex") return Stage::Lex;
     if (arg == "--ast" || arg == "--dump-ast") return Stage::Ast;
     if (arg == "--typed-ast" || arg == "--dump-typed-ast") return Stage::TypedAst;
@@ -78,12 +82,16 @@ static bool takeArgument(int argc, char **argv, int &index, std::string &value, 
     return true;
 }
 
-// Select a single stage before applying the legacy output-only IR default.
+// Plain source invocations execute; output-only invocations retain the IR default.
 static bool parseOptions(int argc, char **argv, Options &options) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         Stage stage = namedStage(arg);
-        if (stage != Stage::Unset) {
+        if (arg == "--") {
+            if (options.input.empty()) return false;
+            for (++i; i < argc; ++i) options.arguments.push_back(argv[i]);
+            break;
+        } else if (stage != Stage::Unset) {
             if (!selectStage(options, stage)) return false;
             if (stage == Stage::VerifyIR && !takeArgument(argc, argv, i, options.input, false))
                 return false;
@@ -104,9 +112,11 @@ static bool parseOptions(int argc, char **argv, Options &options) {
     if (options.stage == Stage::Help) return argc == 2;
     if (options.input.empty()) return false;
     if (options.stage == Stage::Unset)
-        options.stage = options.output.empty() ? Stage::Lex : Stage::IR;
+        options.stage = options.output.empty() ? Stage::Run : Stage::IR;
     if (options.stage == Stage::VerifyIR && !options.output.empty()) return false;
-    return !options.optimizationSet || options.stage == Stage::IR || options.stage == Stage::MIPS;
+    if (options.stage == Stage::Run && !options.output.empty()) return false;
+    if (!options.arguments.empty() && options.stage != Stage::Run) return false;
+    return !options.optimizationSet || options.stage == Stage::IR || options.stage == Stage::MIPS || options.stage == Stage::Run;
 }
 
 static void printTokenTable(std::ostream &out) {
@@ -346,14 +356,14 @@ static int renderAnalyzedStage(const Options &options, std::ostream &out) {
         dumpTypeAnnotations(*g_program, analyzer, out);
         return 0;
     }
-    if (options.stage == Stage::MIPS && !validMain(analyzer)) {
+    if ((options.stage == Stage::MIPS || options.stage == Stage::Run) && !validMain(analyzer)) {
         std::cerr << options.input << ": error[entry-error]: MIPS requires int main() or int main(int, char**)\n";
         return 5;
     }
     IRModule module;
     int status = buildVerifiedIR(options.input, analyzer, &module, options.optimization);
     if (status != 0) return status;
-    if (options.stage == Stage::MIPS) {
+    if (options.stage == Stage::MIPS || options.stage == Stage::Run) {
         std::string assembly;
         std::vector<std::string> errors;
         if (!generateMIPS(module, &assembly, &errors)) {
@@ -392,6 +402,84 @@ static int writeArtifact(const Options &options, std::string artifact) {
     return 1;
 }
 
+static std::string saveRunAssembly(const std::string &assembly) {
+    char path[] = "/tmp/minerva-run-XXXXXX";
+    int fd = mkstemp(path);
+    if (fd < 0) return "";
+    FILE *file = fdopen(fd, "w");
+    if (!file) { close(fd); unlink(path); return ""; }
+    bool written = fwrite(assembly.data(), 1, assembly.size(), file) == assembly.size();
+    if (fclose(file) != 0) written = false;
+    if (!written) { unlink(path); return ""; }
+    return path;
+}
+
+static bool removeSPIMBanner(std::string &pending) {
+    if (pending.size() < 13) return false;
+    if (pending.compare(0, 13, "SPIM Version ") != 0) return true;
+    size_t position = 0, lastLine = 0;
+    for (int line = 0; line < 5; ++line) {
+        lastLine = position;
+        size_t end = pending.find('\n', position);
+        if (end == std::string::npos) return false;
+        position = end + 1;
+    }
+    if (pending.compare(lastLine, 8, "Loaded: ") == 0) pending.erase(0, position);
+    return true;
+}
+
+static void forwardProgramOutput(int fd) {
+    char buffer[4096];
+    std::string pending;
+    bool banner = true;
+    ssize_t length;
+    while ((length = read(fd, buffer, sizeof(buffer))) > 0) {
+        if (banner) {
+            pending.append(buffer, static_cast<size_t>(length));
+            if (!removeSPIMBanner(pending)) continue;
+            std::cout << pending;
+            pending.clear(); banner = false;
+        } else std::cout.write(buffer, length);
+        std::cout.flush();
+    }
+    if (!pending.empty()) std::cout << pending << std::flush;
+    close(fd);
+}
+
+static void launchSPIM(const std::string &path, const Options &options, int pipeFDs[2]) {
+    close(pipeFDs[0]);
+    if (dup2(pipeFDs[1], STDOUT_FILENO) < 0) _exit(5);
+    close(pipeFDs[1]);
+    std::vector<std::string> arguments{"spim", "-file", path};
+    arguments.insert(arguments.end(), options.arguments.begin(), options.arguments.end());
+    std::vector<char *> argv;
+    for (auto &argument : arguments) argv.push_back(argument.data());
+    argv.push_back(nullptr);
+    execvp("spim", argv.data());
+    std::cerr << "Error: cannot launch SPIM; install spim or use --mips to save assembly\n";
+    _exit(5);
+}
+
+static int runProgram(const Options &options, const std::string &assembly) {
+    std::string path = saveRunAssembly(assembly);
+    if (path.empty()) { std::cerr << "Error: cannot write temporary assembly\n"; return 1; }
+    int pipeFDs[2];
+    if (pipe(pipeFDs) != 0) { unlink(path.c_str()); std::cerr << "Error: cannot open SPIM output pipe\n"; return 5; }
+    pid_t child = fork();
+    if (child == 0) launchSPIM(path, options, pipeFDs);
+    close(pipeFDs[1]);
+    if (child < 0) {
+        close(pipeFDs[0]); unlink(path.c_str());
+        std::cerr << "Error: cannot start SPIM\n"; return 5;
+    }
+    forwardProgramOutput(pipeFDs[0]);
+    int status = 0;
+    pid_t waited = waitpid(child, &status, 0);
+    unlink(path.c_str());
+    if (waited < 0) return 5;
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+}
+
 int main(int argc, char **argv) {
     Options options;
     if (!parseOptions(argc, argv, options)) {
@@ -409,5 +497,6 @@ int main(int argc, char **argv) {
     g_program.reset();
     resetInterned();
     if (status != 0) return status;
+    if (options.stage == Stage::Run) return runProgram(options, artifact.str());
     return writeArtifact(options, artifact.str());
 }

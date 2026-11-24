@@ -1,4 +1,4 @@
-#include "ir_generator.h"
+#include "include/ir_generator.h"
 #include <functional>
 
 namespace {

@@ -1,4 +1,4 @@
-#include "ir.h"
+#include "include/ir.h"
 #include <algorithm>
 #include <cstring>
 #include <sstream>
@@ -47,6 +47,7 @@ class Emitter {
     std::ostringstream data, text;
     std::unordered_map<std::string, Home> globals, homes;
     std::unordered_map<std::string, std::string> functions, labels, strings;
+    std::vector<std::string> runtimeHelpers;
     std::string functionName, functionLabel, epilogue;
     TypeRef returnType;
     long long frame = 0;
@@ -56,6 +57,11 @@ class Emitter {
     void error(const std::string &message) { errors.push_back("function '" + functionName + "': " + message); }
     std::string internalLabel() { return functionLabel + "_i" + std::to_string(serial++); }
     long long size(TypeRef type) const { return targetSize(type, module.layouts); }
+
+    void requireRuntime(const std::string &helper) {
+        if (std::find(runtimeHelpers.begin(), runtimeHelpers.end(), helper) == runtimeHelpers.end())
+            runtimeHelpers.push_back(helper);
+    }
 
     void jump(const std::string &target) {
         line("b " + target);
@@ -409,12 +415,14 @@ class Emitter {
     }
 
     void printAction(const std::string &helper, const IROperand &value) {
+        requireRuntime("print_" + helper);
         adjustStack(-8); read(value, "$t0"); memory("sw", "$t0", "$sp", 0);
         line("jal __mv_rt_print_" + helper); line("nop"); adjustStack(8);
     }
 
     void printChunk(std::vector<unsigned char> &bytes) {
         if (bytes.empty()) return;
+        requireRuntime("print_string");
         std::string label = internalLabel() + "_format";
         data << label << ":\n    .byte ";
         for (unsigned char byte : bytes) data << static_cast<unsigned int>(byte) << ", ";
@@ -475,7 +483,11 @@ class Emitter {
             } else { read(arg, "$t0"); memory("sw", "$t0", "$sp", offset); }
             offset += alignTo(std::max(4LL, size(arg.type)), 4);
         }
-        if (direct) line("jal " + functions.at(callee.name));
+        if (direct) {
+            const auto &target = functions.at(callee.name);
+            if (target.compare(0, 8, "__mv_rt_") == 0) requireRuntime(target.substr(8));
+            line("jal " + target);
+        }
         else { read(callee, "$t4"); line("jalr $t4"); }
         line("nop"); adjustStack(area);
         if (!objectType(ins.type) && ins.dest.kind != IROperand::Kind::None) save(ins.dest, "$v0");
@@ -601,7 +613,7 @@ public:
             endFunction();
         }
         if (!errors.empty()) return false;
-        *assembly = ".data\n" + data.str() + ".text\n" + text.str() + emitMIPSRuntime();
+        *assembly = ".data\n" + data.str() + ".text\n" + text.str() + emitMIPSRuntime(runtimeHelpers);
         return true;
     }
 };

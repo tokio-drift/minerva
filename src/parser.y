@@ -1,5 +1,5 @@
 %code requires {
-#include "ast.h"
+#include "include/ast.h"
 }
 
 %code {
@@ -12,7 +12,7 @@
 #include <cstring>
 #include <initializer_list>
 
-#include "frontend.h"
+#include "include/frontend.h"
 
 using namespace std;
 

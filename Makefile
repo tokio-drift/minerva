@@ -1,6 +1,6 @@
 
 CXX       ?= g++
-CXXFLAGS  ?= -Wall -Wno-unused-function -std=c++17 -Isrc -Ibuild
+CXXFLAGS  ?= -Wall -Wno-unused-function -std=c++17 -Isrc -Isrc/include -Ibuild
 FLEX      ?= flex
 BISON     ?= bison
 
@@ -15,19 +15,16 @@ PARSER_HDR  := $(BUILD_DIR)/parser.tab.h
 
 CORE_SRC := src/ast.cpp src/types.cpp src/semantic.cpp src/ir.cpp \
             src/ir_generator.cpp src/ir_optimizer.cpp src/mips_codegen.cpp src/mips_runtime.cpp src/main.cpp
-CORE_HDR := src/ast.h src/types.h src/semantic.h src/frontend.h \
-            src/diagnostic.h src/ir.h src/ir_generator.h
+CORE_HDR := src/include/ast.h src/include/types.h src/include/semantic.h src/include/frontend.h \
+            src/include/diagnostic.h src/include/ir.h src/include/ir_generator.h
 
-.PHONY: all clean regen test test-frontend conflicts
+.PHONY: all clean regen test conflicts
 
 # Default command: build the compiler only.
 all: $(TARGET)
 
-test-frontend: $(TARGET)
-	python3 test/run_tests.py --compiler ./$(TARGET) --frontend
-
 test: $(TARGET)
-	python3 test/run_tests.py --compiler ./$(TARGET)
+	./run.sh ./$(TARGET) run
 
 conflicts: | $(BUILD_STAMP)
 	@$(BISON) -Wcounterexamples --report=state --report-file=$(BUILD_DIR)/conflicts.output --defines=$(BUILD_DIR)/conflicts.tab.h -o $(BUILD_DIR)/conflicts.tab.cpp $(PARSER_FILE) > $(BUILD_DIR)/conflicts.log 2>&1 || { cat $(BUILD_DIR)/conflicts.log >&2; exit 1; }
