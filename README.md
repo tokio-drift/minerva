@@ -80,7 +80,7 @@ Omit the pipe to enter values interactively. Omit the file argument to skip file
 | Literals | Integer/character/string literals; decimal/exponent floats with optional `f`/`F`, including `13.21f`, `.5F`, `1.f`, `1e2f`. |
 | Operators | Arithmetic, comparison, logical and bitwise operators; assignment, increments/decrements, ternary, casts, `sizeof`, address/dereference, indexing and member access. Logical operators short-circuit. |
 | Control flow | `if`/`else`, `for`, `while`, `do`/`while`, `do`/`until`, `switch`/`case`/`default`, `goto`, `break`, `continue`, `return`. |
-| Functions | Arguments, recursion, function pointers, callbacks, scalar/aggregate parameters and returns. |
+| Functions | Arguments, recursion, function pointers, callbacks, scalar/aggregate parameters and returns. File-scope prototypes such as `int add(int, int);`, with optional parameter names, matching redeclarations and declaration/definition checks. `f()` and `f(void)` both mean no parameters. Referenced functions need a definition in the same source file. |
 | Lambdas | Captureless `[]` lambdas with inferred returns or explicit `-> type`, including float, void, pointer and reference results. An explicit return type supports bodies with local variables. They can be called directly, passed as callbacks or assigned to compatible function pointers. |
 | Arrays and pointers | Fixed multidimensional arrays, row-major storage, pointer arithmetic, multilevel pointers, strings and character buffers. `nullptr` and integer literal `0` work as null pointers; ordinary integer variables do not implicitly convert to pointers. |
 | User-defined types | `struct`, `union`, `enum`, `typedef`; classes with public/private/protected access and single nonvirtual inheritance. Struct fields have natural padding; unions overlap fields; the base object prefixes a derived object. |
@@ -106,7 +106,7 @@ Omit the pipe to enter values interactively. Omit the file argument to skip file
 
 File flags follow SPIM's host. The Linux demo uses `577` to create/truncate for writing, `0` to reopen for reading, and mode `420` (octal 0644). Reads do not append a null terminator; reserve a byte and add it before printing with `%s`. Dynamic I/O formats require matching argument types and adequate buffers; unsupported formatting exits nonzero.
 
-Syntax limits: declare different pointer depths separately; `sizeof` requires parentheses; each case/default owns one statement (use a block for several). Captured locals, function prototypes, preprocessor expansion, multiple/virtual inheritance, constructors/destructors, templates, exceptions, namespaces, user-defined variadic functions, `double`, a string class, placement new, array initializer lists and source-level malloc/calloc/realloc are outside this subset. Printf width/precision flags and unbounded scanf `%s` are unsupported.
+Syntax limits: declare different pointer depths separately; `sizeof` requires parentheses; each case/default owns one statement (use a block for several). Captured locals, block-scope prototypes, out-of-class method definitions, external linking, preprocessor expansion, multiple/virtual inheritance, constructors/destructors, templates, exceptions, namespaces, user-defined variadic functions, `double`, a string class, placement new, array initializer lists and source-level malloc/calloc/realloc are outside this subset. Printf width/precision flags and unbounded scanf `%s` are unsupported.
 
 ## Swap, pipe, snapshot and rewind
 

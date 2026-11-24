@@ -48,6 +48,15 @@ static string S(const char *s) { return s ? string(s) : string(); }
 static NodeList *newList() { return new NodeList(); }
 static NodeList *newList(Node *n) { auto *l = new NodeList(); l->emplace_back(n); return l; }
 static NodeList *append(NodeList *l, Node *n) { l->emplace_back(n); return l; }
+static NodeList *normalizeParameters(NodeList *params) {
+    if (params->size() == 1) {
+        const auto &param = static_cast<const VarDecl &>(*params->front());
+        if (param.name.empty() && param.type.base == "void" && param.type.suffix.empty() &&
+            !param.type.isConst && !param.type.isStatic && !param.isFuncPtr && param.dims.empty())
+            params->clear();
+    }
+    return params;
+}
 static NodeList *appendAll(NodeList *dst, NodeList *src) {
     for (auto &p : *src) dst->emplace_back(std::move(p));
     delete src;
@@ -130,7 +139,7 @@ static Node *makeDeclStmt(SrcLoc l, TypeSpec *t, NodeList *decls) {
 %token ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN AND_ASSIGN OR_ASSIGN XOR_ASSIGN
 %token PIPE_OP
 
-%type <node> external_declaration function_definition declaration class_definition struct_definition
+%type <node> external_declaration function_definition function_declaration declaration class_definition struct_definition
 %type <node> union_definition enum_definition parameter_declaration name_init_declarator name_declarator
 %type <node> init_declarator declarator initializer local_declarators local_declaration class_member
 %type <node> compound_statement statement labeled_statement expression_statement selection_statement
@@ -194,6 +203,7 @@ translation_unit
 external_declaration
     : PREPROCESSOR { $$ = new Directive(L(@1), S($1)); }
     | function_definition
+    | function_declaration
     | declaration
     | class_definition
     | struct_definition
@@ -439,9 +449,15 @@ function_definition
           $$ = new FuncDef(L(@2), S($2), ret, take($4), $6); }
     ;
 
+function_declaration
+    : full_type IDENTIFIER '(' parameter_list_opt ')' ';' {
+          TypeSpec ret = *$1; delete $1;
+          $$ = new FuncDef(L(@2), S($2), ret, take($4), nullptr); }
+    ;
+
 parameter_list_opt
     : /* empty */ { $$ = newList(); }
-    | parameter_list { $$ = $1; }
+    | parameter_list { $$ = normalizeParameters($1); }
     ;
 
 parameter_list
@@ -465,6 +481,13 @@ parameter_declaration
           v->type = *$1; delete $1;
           v->isFuncPtr = true;
           v->fpParams = take($7);
+          $$ = v; }
+    | full_type '(' '*' ')' '(' parameter_list_opt ')' {
+          retagRecentToken(@3.first_line, "*", "FUNCTION_POINTER_DECLARATOR");
+          auto *v = new VarDecl(NodeKind::Param, L(@1), "");
+          v->type = *$1; delete $1;
+          v->isFuncPtr = true;
+          v->fpParams = take($6);
           $$ = v; }
     ;
 

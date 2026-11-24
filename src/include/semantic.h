@@ -93,7 +93,7 @@ private:
     const Symbol *lookup(const std::string &name) const;
     bool declareVariable(const std::string &name, TypeRef type, const SrcLoc &loc,
                          const Node *declaration = nullptr, bool persistent = false);
-    bool declareFunction(const std::string &name, TypeRef type, const SrcLoc &loc);
+    bool declareFunction(const std::string &name, TypeRef type, const SrcLoc &loc, bool defined = true);
     bool declareTypeName(const std::string &name, TypeRef type, const SrcLoc &loc);
 
     static ExprInfo decay(ExprInfo value);

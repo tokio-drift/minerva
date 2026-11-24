@@ -282,6 +282,7 @@ bool IRGenerator::lowerLambda(const Unsupported &lambda) {
 
 // Retain source reference signatures while lowering their storage.
 bool IRGenerator::lowerFunction(const FuncDef &fn) {
+    if (!fn.body) return true;
     TypeRef signature = analyzer_->typeOfFunction(&fn);
     if (!signature || !signature->ret) {
         irError(fn.loc, "no signature was resolved for '" + fn.name + "'");

@@ -139,9 +139,10 @@ static void dumpNode(const Node *n, std::ostream &os, int d) {
         pad(os, d); os << "Directive " << rtrim(static_cast<const Directive *>(n)->text) << '\n'; break;
     case NodeKind::FuncDef: {
         auto *x = static_cast<const FuncDef *>(n);
-        pad(os, d); os << "FuncDef " << x->name << " : " << x->ret.str() << '\n';
+        pad(os, d); os << (x->body ? "FuncDef " : "FuncDecl ") << x->name << " : " << x->ret.str() << '\n';
         dumpList(x->params, os, d + 1);
-        dumpNode(x->body.get(), os, d + 1); break;
+        if (x->body) dumpNode(x->body.get(), os, d + 1);
+        break;
     }
     case NodeKind::Param:   dumpVar(*static_cast<const VarDecl *>(n), "Param", os, d); break;
     case NodeKind::VarDecl: dumpVar(*static_cast<const VarDecl *>(n), "VarDecl", os, d); break;

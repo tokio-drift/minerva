@@ -385,13 +385,23 @@ bool Analyzer::declareVariable(const std::string &name, TypeRef type, const SrcL
     return true;
 }
 
-bool Analyzer::declareFunction(const std::string &name, TypeRef type, const SrcLoc &loc) {
+bool Analyzer::declareFunction(const std::string &name, TypeRef type, const SrcLoc &loc, bool defined) {
     auto &scope = scopes_.back();
-    if (scope.count(name)) {
-        error(loc, "redefinition", "redefinition of '" + name + "'");
-        return false;
+    auto found = scope.find(name);
+    if (found != scope.end()) {
+        Symbol &previous = found->second;
+        if (previous.kind != Symbol::Kind::Function || !sameType(previous.type, type)) {
+            error(loc, "conflicting-declaration", "conflicting declaration of '" + name + "'");
+            return false;
+        }
+        if (defined && previous.defined) {
+            error(loc, "redefinition", "redefinition of '" + name + "'");
+            return false;
+        }
+        previous.defined = previous.defined || defined;
+        return true;
     }
-    scope.emplace(name, Symbol{Symbol::Kind::Function, std::move(type), true, loc});
+    scope.emplace(name, Symbol{Symbol::Kind::Function, std::move(type), defined, loc});
     return true;
 }
 
@@ -665,9 +675,16 @@ void Analyzer::registerFunctions(const Program &program) {
     auto registerFunction = [&](const FuncDef &fn, const std::string &owner) {
         TypeRef ret = resolveType(fn.ret, fn.loc);
         std::vector<TypeRef> explicitParams;
+        std::unordered_set<std::string> paramNames;
         for (const auto &p : fn.params) {
             const VarDecl &v = *static_cast<const VarDecl *>(p.get());
-            explicitParams.push_back(adjustedParameterType(typeOfDecl(v, v.loc)));
+            TypeRef type = adjustedParameterType(typeOfDecl(v, v.loc));
+            if (type->kind == TypeKind::Void)
+                error(v.loc, "invalid-declaration", "void must be the only unnamed parameter");
+            if (!fn.body && !v.name.empty() && !paramNames.insert(v.name).second)
+                error(v.loc, "redeclaration", "duplicate parameter '" + v.name + "'");
+            declTypes_[&v] = type;
+            explicitParams.push_back(type);
         }
         TypeRef callType = makeFunction(ret, explicitParams);
         std::vector<TypeRef> implementationParams;
@@ -682,7 +699,7 @@ void Analyzer::registerFunctions(const Program &program) {
         TypeRef signature = makeFunction(ret, implementationParams);
         functionTypes_[&fn] = signature;
         functionNames_[&fn] = qualified;
-        declareFunction(qualified, signature, fn.loc);
+        declareFunction(qualified, signature, fn.loc, fn.body != nullptr);
     };
     for (const auto &item : program.items) {
         if (item->kind == NodeKind::FuncDef) registerFunction(*static_cast<const FuncDef *>(item.get()), "");
@@ -698,6 +715,7 @@ void Analyzer::registerFunctions(const Program &program) {
 
 // Check the body with its parameters and implicit object in scope.
 void Analyzer::checkFunction(const FuncDef &fn) {
+    if (!fn.body) return;
     TypeRef signature;
     auto known = functionTypes_.find(&fn);
     if (known != functionTypes_.end()) {
@@ -1491,6 +1509,8 @@ ExprInfo Analyzer::checkIdent(const Ident &id) {
         error(id.loc, "type-name", "'" + id.name + "' names a type, not a value");
         return {makeUnknown(), ExprCategory::RValue};
     }
+    if (sym->kind == Symbol::Kind::Function && !sym->defined)
+        error(id.loc, "undefined-function", "function '" + id.name + "' is declared but has no definition");
     if (sym->kind == Symbol::Kind::EnumConstant) return {makeType(TypeKind::Int), ExprCategory::RValue};
     ExprCategory category =
         sym->kind == Symbol::Kind::Function ? ExprCategory::RValue : ExprCategory::LValue;
