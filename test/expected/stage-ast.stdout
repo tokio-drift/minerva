@@ -1,0 +1,17 @@
+Program
+  FuncDef main : int
+    Block
+      DeclStmt
+        VarDecl a : int
+          Init
+            IntLit 2
+      DeclStmt
+        VarDecl b : int
+          Init
+            IntLit 3
+      Return
+        Binary +
+          Ident a
+          Binary *
+            Ident b
+            IntLit 4

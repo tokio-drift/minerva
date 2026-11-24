@@ -1,0 +1,11 @@
+semantic analysis: no errors
+1:5  Function main => int ()
+2:9  VarDecl a => int [declaration]
+2:13  IntLit 2 => int [rvalue]
+3:9  VarDecl b => int [declaration]
+3:13  IntLit 3 => int [rvalue]
+4:14  Binary + => int [rvalue]
+4:12  Ident a => int [lvalue]
+4:18  Binary * => int [rvalue]
+4:16  Ident b => int [lvalue]
+4:20  IntLit 4 => int [rvalue]
