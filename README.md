@@ -179,3 +179,9 @@ generated/             file-demo output
 ```
 
 Generated build files, compiler binaries and artifact directories are ignored by Git.
+
+## Unsupported features
+
+- **Full C compatibility:** preprocessor directives/macros, `double`, and the standard `NULL` macro. Use `float` and `nullptr` or literal `0`.
+- **Closures and complex declarations:** captured lambdas and raw declarators for functions returning function pointers.
+- **Advanced C++:** virtual dispatch, multiple/virtual inheritance, automatic constructors/destructors, operator overloading, templates and exceptions.
