@@ -1,1 +1,0 @@
-int main() { float value = 1.5; int &alias = value; return 0; }

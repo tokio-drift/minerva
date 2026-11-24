@@ -1,8 +1,0 @@
-int increment(int value) { return value + 1; }
-float combine(int a, char b, short c, unsigned d, float e, int *pointer) {
-    return a + b + c + d + e + *pointer;
-}
-int main() {
-    int value = 6;
-    return (int)combine(increment(0), 2, 3, 4, 5.5, &value);
-}

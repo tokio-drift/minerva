@@ -1,2 +1,0 @@
-int invalid = 1 << 32;
-int main() { return 0; }

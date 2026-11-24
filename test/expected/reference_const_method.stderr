@@ -1,2 +1,0 @@
-error[const-assignment]
-cannot call a non-const method

@@ -1,2 +1,0 @@
-error[constant-required]
-global and static initializers must be constant

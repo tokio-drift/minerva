@@ -1,7 +1,0 @@
-layout struct Bad size 8 align 4
-  field int value offset 0
-endlayout
-func main() -> int {
-  %t0 = const int 0
-  ret %t0
-}

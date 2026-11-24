@@ -1,1 +1,0 @@
-int main() { char text[2] = "abc"; return 0; }

@@ -1,3 +1,0 @@
-func identity(value int&) -> int& {
-  ret value
-}

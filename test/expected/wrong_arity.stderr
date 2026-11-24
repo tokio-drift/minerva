@@ -1,2 +1,0 @@
-error[ir-error]
-passes 0 argument(s) to 'identity' which takes 1

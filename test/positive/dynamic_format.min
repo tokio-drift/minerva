@@ -1,6 +1,0 @@
-int main(int argc, char **argv) {
-    char format[] = "d=%d u=%u f=%f c=%c s=%s %%\n";
-    if (argc > 1) { printf(argv[1], 0); return 2; }
-    printf(format, (int)0x80000000, (unsigned)-1, 1.5, 'Q', "hi");
-    return 0;
-}

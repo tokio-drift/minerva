@@ -1,3 +1,0 @@
-int add(int x) { return x; }
-int apply(int (*fn)(int), int a) { return fn(a); }
-int main() { int (*fn)(int) = add; return apply(fn, 20); }

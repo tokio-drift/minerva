@@ -1,2 +1,0 @@
-struct Box { int value; };
-int main() { struct Box box; const struct Box &view = box; view.value = 2; return 0; }

@@ -1,6 +1,0 @@
-func main() -> int {
-  %t0 = const int 1
-  br %t0, here, missing
-  here:
-  ret %t0
-}

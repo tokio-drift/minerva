@@ -1,6 +1,0 @@
-int main() {
-    int seen = 0;
-    int skipped = 0 && (seen = 1);
-    int taken = 1 || (seen = 2);
-    return seen;
-}

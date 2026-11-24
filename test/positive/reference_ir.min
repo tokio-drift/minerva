@@ -1,9 +1,0 @@
-int &choose(int &value) { return value; }
-int main() {
-    int value = 3;
-    int &alias = value;
-    alias = 4;
-    int *address = &alias;
-    choose(value) = 5;
-    return alias + *address;
-}

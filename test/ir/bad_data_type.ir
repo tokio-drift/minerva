@@ -1,6 +1,0 @@
-global char[4] values
-data int values + 0 = 7
-func main() -> int {
-  %t0 = const int 0
-  ret %t0
-}

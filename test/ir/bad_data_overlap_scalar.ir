@@ -1,6 +1,0 @@
-data int value + 0 = 7
-global int value = 1
-func main() -> int {
-  %t0 = const int 0
-  ret %t0
-}

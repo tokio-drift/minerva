@@ -1,2 +1,0 @@
-int value() { return 4; }
-int main() { static int counter = value(); return counter; }

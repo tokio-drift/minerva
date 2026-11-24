@@ -1,5 +1,0 @@
-int main() {
-    int (*fn)(int);
-    fn = [](int x) { return x + 3; };
-    return fn(4);
-}

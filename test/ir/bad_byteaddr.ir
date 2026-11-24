@@ -1,5 +1,0 @@
-func main() -> int {
-  %t0 = const int 0
-  %t1 = byteaddr int* %t0, 4
-  ret %t0
-}

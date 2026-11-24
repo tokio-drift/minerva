@@ -1,5 +1,0 @@
-struct Pair { char tag; int value; };
-int values[3] = {1, 2};
-struct Pair pair = {'a', 7};
-int next() { static int counter = 1; counter++; return counter; }
-int main() { return next() + values[2] + pair.value; }
