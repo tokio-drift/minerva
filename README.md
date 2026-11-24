@@ -92,7 +92,7 @@ Supported features include arithmetic, bitwise and logical operators; casts and 
 | Signed `short` | 2/2 |
 | `int`, `unsigned`, enum, `float`, pointer | 4/4 |
 
-Arrays are contiguous and row-major. Struct fields follow declaration order with natural padding; union fields overlap at offset zero. A base object is a prefix of its derived object. Floats are single precision. References bind existing lvalues and lower to pointers; `sizeof` a reference measures its referent. Const binding/mutation is checked, but there is no dangling-reference lifetime analysis. Globals and static locals have zero/constant initialization; automatic locals must be initialized before reading.
+Arrays are contiguous and row-major. Struct fields follow declaration order with natural padding; union fields overlap at offset zero. A base object is a prefix of its derived object. Floats are single precision. Decimal/exponent literals accept optional `f`/`F` suffixes, including `13.21f`, `.5F`, `1.f` and `1e2f`; `.5` and `1.` also work without a suffix. References bind existing lvalues and lower to pointers; `sizeof` a reference measures its referent. Const binding/mutation is checked, but there is no dangling-reference lifetime analysis. Globals and static locals have zero/constant initialization; automatic locals must be initialized before reading.
 
 Generated functions use a private stack convention: four-byte scalar argument slots, complete aggregate arguments rounded up to four, and argument areas/frames aligned to eight. Scalars, including float bits, return in `$v0`; aggregate results use a hidden first pointer. Parameters, locals and temporaries have stack homes. This is not the native operating-system ABI.
 
@@ -106,9 +106,51 @@ Switches with up to five cases use a comparison chain. Larger switches use a jum
 - `scanf`: `%d`, `%u`, `%f`, `%c`, `%%`, and bounded `%Ns` with a positive string width. A string destination needs N+1 bytes. Numeric/string conversions skip input whitespace; `%c` reads the next character. Whitespace in the format consumes input whitespace. Literal delimiters are matched.
 - Input is read a character at a time with pushback, so multiple values on one line work. Decimal floats accept signs, fractions and exponents. Failed conversions leave their destination unchanged. Dynamic callers must supply matching argument types and buffers; unsupported dynamic formatting prints a short error and exits nonzero.
 
+### File I/O
+
+Four predefined functions expose SPIM's descriptor services; no include or source prototype is needed:
+
+| Function | Result |
+| --- | --- |
+| `file_open(const char *path, int flags, int mode)` | int descriptor, negative on failure |
+| `file_read(int fd, char *buffer, int count)` | int bytes read; zero at EOF, negative on failure |
+| `file_write(int fd, const char *buffer, int count)` | int bytes written, negative on failure |
+| `file_close(int fd)` | void |
+
+Read buffers must be writable. Reads do not add a null terminator: reserve one extra byte and append it before printing with `%s`. Counts describe bytes, and buffers must be large enough. Each write is one operation; there is no retry or file-stream buffering layer. Use opened file descriptors rather than mixing raw stdin reads with scanf's pushback.
+
+Open flags are those used by SPIM on its host. Demo 8 targets Linux: flags `577` create/truncate for writing, flags `0` reopen for reading, and permissions `420` mean octal 0644. This is a small descriptor API, not C stdio or a portable libc ABI.
+
+`make test` supplies the optional third program argument naming `generated/file_demo.txt`. To run that part directly:
+
+```bash
+mkdir -p generated
+printf '12 3.5 X minerva\n' | ./minerva test/test8_io_and_arguments.min -- hello "compiler demo" generated/file_demo.txt
+```
+
+The program prints the filename, write/read counts and recovered contents. Omitting the file argument retains the input/argument-only demonstration.
+
 ### Storage and history
 
-`new T` and `new T()` accept named aggregates without constructor arguments or implicit zero initialization. `delete` uses an internal first-fit free list over SPIM sbrk memory. Payloads are eight-byte aligned; freed blocks are reused whole, without splitting or coalescing. Deleting nullptr is harmless.
+`new T` allocates one uninitialized object; `new T()` zero-initializes it. `new T(value)` initializes a scalar, converting the value to T. Supported types include char, short, int, unsigned, float, pointers, complete aggregates and typedef aliases. Empty parentheses also zero aggregate storage; no constructor is called.
+
+`new T[n]` evaluates the integer length once and allocates a contiguous runtime-sized array; `new T[n]()` zero-fills it. For example:
+
+```text
+int *value = new int(5);
+float *fraction = new float(2.5f);
+int n = 4;
+float *array = new float[n];
+int *zeros = new int[n]();
+delete value;
+delete fraction;
+delete[] array;
+delete[] zeros;
+```
+
+Zero/negative lengths, size overflow and allocation failure yield nullptr. Scalar initializers run once after successful allocation; null results are never initialized. Bare allocations leave their bytes uninitialized. One runtime bound is supported; fixed-array typedefs may be element types. Void, references, functions and incomplete types cannot be allocated. Placement new, array initializer lists and constructors/destructors are outside this subset.
+
+`delete` and `delete[]` use the same internal first-fit free list over SPIM sbrk memory. Payloads are eight-byte aligned; freed blocks are reused whole, without splitting or coalescing. Deleting nullptr is harmless. There are no destructor calls or checks for mismatched deletion.
 
 `snapshot x;` saves x's current complete object bytes. `rewind x;` restores and pops one snapshot; `rewind x, n;` restores up to n, newest first. Empty histories and nonpositive counts do nothing. Arrays and aggregates copy their bytes, pointers are shallow copies, and references save/restore their referent.
 
@@ -130,8 +172,8 @@ Each `.min` file is a standalone program with labeled output.
 | `test4_functions.min` | Calls, recursion, callbacks, function pointers, captureless lambdas, mixed arguments, float returns and reference parameters/returns |
 | `test5_structs_unions_enums.min` | Struct/union layouts, nested initialization, aggregate arguments/returns/copying, member access, enums and typedefs |
 | `test6_classes.min` | Objects, methods, private/protected/public members, single inheritance, object copying and independent instances |
-| `test7_dynamic_memory.min` | A heap-allocated linked list, new/delete, freed-block reuse and nullptr |
-| `test8_io_and_arguments.min` | argc/argv, arguments containing spaces, printf/scanf, bounded strings and dynamic formats |
+| `test7_dynamic_memory.min` | Initialized heap scalars, runtime-sized/zero-filled arrays, new/delete[], a linked list, block reuse and nullptr |
+| `test8_io_and_arguments.min` | argc/argv, printf/scanf, bounded strings, dynamic formats and a file open/write/read/close round trip |
 | `test9_types_storage_references.min` | Numeric sizes/conversions, signed char/short, unsigned, float, const, globals, statics, shadowing and scalar/array references |
 | `test10_history_and_extensions.min` | Pipe, swap, single/multiple rewind and a snapshot-based backtracking search |
 
@@ -146,7 +188,7 @@ make regen
 make conflicts
 ```
 
-`run.sh clean` removes generated artifact folders. `make clean` also removes the compiler and build directory; `make regen` regenerates the lexer/parser and rebuilds. Fixtures are preserved. The grammar declares `%expect 4`: four accepted shift/reduce conflicts. `make conflicts` writes the Bison state report to `build/conflicts.output` and counterexamples to `build/conflicts.log`, and prints the latter. Counterexample searches can reach Bison's time limit; the state report still records the four accepted conflicts.
+`run.sh clean` removes generated artifact folders and the generated file-demo directory. `make clean` also removes the compiler and build directory; `make regen` regenerates the lexer/parser and rebuilds. Fixtures are preserved. The grammar declares `%expect 4`: four accepted shift/reduce conflicts. `make conflicts` writes the Bison state report to `build/conflicts.output` and counterexamples to `build/conflicts.log`, and prints the latter. Counterexample searches can reach Bison's time limit; the state report still records the four accepted conflicts.
 
 ```text
 Makefile, README.md, run.sh
@@ -155,6 +197,7 @@ src/include/         project headers
 test/                ten standalone .min demonstration programs
 build/               generated lexer/parser, build stamps and conflict reports
 ir/, typed_ast/, mips/  generated demo artifacts
+generated/           file-demo output
 ```
 
 Generated build files, compiler binaries and artifact directories are ignored by Git.

@@ -24,8 +24,8 @@ case "$MODE" in run|ir|ast|mips|test|clean) ;; *) usage ;; esac
 if [[ "$MODE" == test ]]; then MODE=run; fi
 
 if [[ "$MODE" == clean ]]; then
-  rm -rf "$ROOT/ir" "$ROOT/typed_ast" "$ROOT/mips"
-  echo "Removed generated IR, typed AST and MIPS folders."
+  rm -rf "$ROOT/ir" "$ROOT/typed_ast" "$ROOT/mips" "$ROOT/generated"
+  echo "Removed generated IR, typed AST, MIPS and demo file folders."
   exit 0
 fi
 
@@ -47,8 +47,9 @@ mapfile -d '' -t SOURCES < <(find "$ROOT/test" -maxdepth 1 -type f -name '*.min'
 
 run_demo() {
   if [[ "$(basename "$1")" == test8_io_and_arguments.min ]]; then
-    echo 'Sample input: 12 3.5 X minerva; arguments: hello "compiler demo"'
-    printf '12 3.5 X minerva\n' | "$EXE" --run "$1" -- hello "compiler demo"
+    mkdir -p "$ROOT/generated"
+    echo 'Sample input: 12 3.5 X minerva; arguments: hello "compiler demo" generated/file_demo.txt'
+    printf '12 3.5 X minerva\n' | "$EXE" --run "$1" -- hello "compiler demo" "$ROOT/generated/file_demo.txt"
   else
     "$EXE" --run "$1"
   fi
