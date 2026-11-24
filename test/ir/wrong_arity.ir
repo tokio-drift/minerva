@@ -1,0 +1,7 @@
+func identity(value int) -> int {
+  ret value
+}
+func main() -> int {
+  %t0 = call int identity()
+  ret %t0
+}

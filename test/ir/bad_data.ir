@@ -1,0 +1,7 @@
+global int[2] values
+data int values + 4 = 7
+data int values + 4 = 8
+func main() -> int {
+  %t0 = const int 0
+  ret %t0
+}

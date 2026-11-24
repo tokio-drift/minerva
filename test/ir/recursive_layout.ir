@@ -1,0 +1,9 @@
+layout struct Cycle size 4 align 4
+  field Cycle value offset 0
+endlayout
+global Cycle cycle
+data int cycle + 0 = 1
+func main() -> int {
+  %t0 = const int 0
+  ret %t0
+}

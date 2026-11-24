@@ -1,0 +1,7 @@
+func main() -> int {
+  %t0 = const float 1.0
+  switch int %t0, default L0
+  L0:
+  %t1 = const int 0
+  ret %t1
+}
