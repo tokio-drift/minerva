@@ -132,6 +132,8 @@ The program prints the filename, write/read counts and recovered contents. Omitt
 
 ### Storage and history
 
+The integer literal `0` also works as a null pointer in initialization, assignment, arguments, returns, equality comparisons and conditional expressions. Ordinary integer variables are not implicitly converted to pointers; `nullptr` remains supported.
+
 `new T` allocates one uninitialized object; `new T()` zero-initializes it. `new T(value)` initializes a scalar, converting the value to T. Supported types include char, short, int, unsigned, float, pointers, complete aggregates and typedef aliases. Empty parentheses also zero aggregate storage; no constructor is called.
 
 `new T[n]` evaluates the integer length once and allocates a contiguous runtime-sized array; `new T[n]()` zero-fills it. For example:

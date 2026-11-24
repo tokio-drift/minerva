@@ -15,6 +15,16 @@ bool startsWith(const std::string &s, const char *prefix) {
 
 bool unknownType(const TypeRef &t) { return !t || t->kind == TypeKind::Unknown; }
 
+bool nullPointerLiteral(const Node *node) {
+    long long value;
+    return node && node->kind == NodeKind::IntLit &&
+           integerLiteralValue(static_cast<const Literal *>(node)->text, &value) && value == 0;
+}
+
+bool assignableExpression(TypeRef target, TypeRef source, const Node *node) {
+    return assignable(target, source) || (target && target->isPointer() && nullPointerLiteral(node));
+}
+
 TypeRef withConst(TypeRef type) {
     if (!type || type->isConst) return type;
     auto qualified = std::make_shared<Type>(*type);
@@ -894,7 +904,7 @@ void Analyzer::checkInitializerValue(Node *node, TypeRef type) {
         return;
     }
     ExprInfo value = decay(checkExpression(node));
-    if (!assignable(type, value.type))
+    if (!assignableExpression(type, value.type, node))
         error(node->loc, "type-mismatch", "incompatible types in initialization ('" + type->str() +
               "' expected, '" + value.type->str() + "' given)");
 }
@@ -1027,7 +1037,7 @@ void Analyzer::checkReturn(const Return &r) {
         error(r.loc, "type-mismatch", "void function cannot return a value");
         return;
     }
-    if (!assignable(ret, value.type))
+    if (!assignableExpression(ret, value.type, r.value.get()))
         error(r.loc, "type-mismatch",
               "incompatible return type ('" + ret->str() + "' expected, '" + value.type->str() +
                   "' given)");
@@ -1145,7 +1155,8 @@ void Analyzer::checkUnsupported(const Unsupported &u) {
     case UnsupKind::Delete: {
         if (!u.kids.empty() && u.kids[0]) {
             ExprInfo value = decay(checkExpression(u.kids[0].get()));
-            if (!value.type->isPointer() || value.type->sub->isFunction())
+            if ((!value.type->isPointer() && !nullPointerLiteral(u.kids[0].get())) ||
+                (value.type->isPointer() && value.type->sub->isFunction()))
                 error(u.loc, "invalid-operand",
                       "cannot delete a value of type '" + value.type->str() + "'");
         }
@@ -1179,7 +1190,7 @@ void Analyzer::checkUnsupported(const Unsupported &u) {
         }
         if (callable->params.size() != 1)
             error(u.loc, "call-arity", "pipe target must accept exactly one argument");
-        else if (!assignable(callable->params[0], left.type))
+        else if (!assignableExpression(callable->params[0], left.type, u.kids[0].get()))
             error(u.loc, "type-mismatch", "pipe input type '" + left.type->str() + "' is not assignable to '" + callable->params[0]->str() + "'");
         return;
     }
@@ -1225,7 +1236,7 @@ TypeRef Analyzer::checkNew(const Unsupported &node) {
         ExprInfo value = decay(checkExpression(node.kids[1].get()));
         if (!unknownType(object) && !object->isScalar())
             error(node.loc, "unsupported-construct", "new initializer requires a scalar type; constructors are not supported");
-        else if (!assignable(object, value.type))
+        else if (!assignableExpression(object, value.type, node.kids[1].get()))
             error(node.kids[1]->loc, "type-mismatch", "incompatible initializer for allocated type '" + object->str() + "'");
     }
     return object;
@@ -1615,8 +1626,8 @@ ExprInfo Analyzer::checkBinary(const Binary &b) {
     }
 
     if (op == "==" || op == "!=") {
-        bool nullComparison = (lp && right.type->kind == TypeKind::Unknown) ||
-                              (rp && left.type->kind == TypeKind::Unknown);
+        bool nullComparison = (lp && nullPointerLiteral(b.rhs.get())) ||
+                              (rp && nullPointerLiteral(b.lhs.get()));
         bool comparable = (l.type->isNumeric() && r.type->isNumeric()) || compatiblePointers || nullComparison;
         if (!comparable)
             error(b.loc, "type-mismatch",
@@ -1681,7 +1692,7 @@ ExprInfo Analyzer::checkAssign(const Assign &a) {
         return {makeUnknown(), ExprCategory::RValue};
 
     if (a.op == "=") {
-        if (!assignable(left.type, right.type))
+        if (!assignableExpression(left.type, right.type, a.rhs.get()))
             error(a.loc, "type-mismatch",
                   "incompatible types in assignment ('" + left.type->str() + "' and '" +
                       right.type->str() + "')");
@@ -1715,6 +1726,10 @@ ExprInfo Analyzer::checkConditional(const Conditional &c) {
         return {makeUnknown(), ExprCategory::RValue};
     if (sameType(thenValue.type, elseValue.type))
         return {thenValue.type, ExprCategory::RValue};
+    if (thenValue.type->isPointer() && nullPointerLiteral(c.elseE.get()))
+        return {thenValue.type, ExprCategory::RValue};
+    if (elseValue.type->isPointer() && nullPointerLiteral(c.thenE.get()))
+        return {elseValue.type, ExprCategory::RValue};
     if (thenValue.type->isNumeric() && elseValue.type->isNumeric())
         return {usualArithmetic(thenValue.type, elseValue.type), ExprCategory::RValue};
     error(c.loc, "type-mismatch",
@@ -1751,12 +1766,12 @@ ExprInfo Analyzer::checkCall(const Call &c) {
         TypeRef expected = function->params[i];
         TypeRef actual = decay(argument).type;
         bool valid = expected->kind == TypeKind::Reference
-            ? bindableReference(expected, argument) : assignable(expected, actual);
+            ? bindableReference(expected, argument) : assignableExpression(expected, actual, c.args[i].get());
         if (expected->isPointer() && actual->isPointer() && actual->sub->isConst && !expected->sub->isConst)
             valid = false;
         if (c.callee->kind == NodeKind::Ident) {
             const auto &name = static_cast<const Ident &>(*c.callee).name;
-            if (fileFunctionType(name) && expected->isPointer()) {
+            if (fileFunctionType(name) && expected->isPointer() && !nullPointerLiteral(c.args[i].get())) {
                 if (name == "file_read" && actual->isPointer() && actual->sub->kind == TypeKind::Char &&
                     (actual->sub->isConst || c.args[i]->kind == NodeKind::StringLit)) {
                     error(c.args[i]->loc, "file-buffer", "file_read requires a writable char buffer"); continue;
