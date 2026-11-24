@@ -74,3 +74,14 @@ Testing/
 # local-only planning docs
 SCOPE.md
 WORK.md
+.commandcode/
+
+/ir/
+/typed_ast/
+/mips/
+/generated/
+__pycache__/
+*.pyc
+/INFO.md
+/PROJECT.md
+/EXTRA_INFO.md
