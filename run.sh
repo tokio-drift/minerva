@@ -1,114 +1,75 @@
-
 #!/usr/bin/env bash
-# Usage: ./run.sh [ir|ast|clean]
-# Default: generate IR for every supported source file under test/.
-
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODE="${1:-ir}"
+MODE=ir
 EXE="${MINERVA_BIN:-$ROOT/minerva}"
-TEST_DIR="$ROOT/test"
-IR_DIR="$ROOT/ir"
-AST_DIR="$ROOT/typed_ast"
-MIPS_DIR="$ROOT/mips"
+BUILD_DEFAULT=1
+if [[ -n "${MINERVA_BIN:-}" ]]; then BUILD_DEFAULT=0; fi
 
-case "$MODE" in
-  ir|ast|clean) ;;
-  *)
-    echo "Usage: $0 [ir|ast|clean]" >&2
-    exit 2
-    ;;
-esac
+usage() {
+  echo "Usage: $0 [BINARY] [ir|ast|mips|test|clean]" >&2
+  exit 2
+}
 
-if [[ "$MODE" == "clean" ]]; then
-  rm -rf "$IR_DIR" "$AST_DIR" "$MIPS_DIR"
+if (( $# )); then
+  case "$1" in
+    ir|ast|mips|test|clean) MODE="$1"; shift ;;
+    *) EXE="$1"; BUILD_DEFAULT=0; shift
+       if (( $# )); then MODE="$1"; shift; fi ;;
+  esac
+fi
+(( $# == 0 )) || usage
+case "$MODE" in ir|ast|mips|test|clean) ;; *) usage ;; esac
+
+if [[ "$MODE" == clean ]]; then
+  rm -rf "$ROOT/ir" "$ROOT/typed_ast" "$ROOT/mips"
   echo "Removed generated IR, typed AST and MIPS folders."
   exit 0
 fi
 
-if [[ ! -x "$EXE" ]]; then
-  echo "Compiler executable missing; building compiler..."
-  if ! make -C "$ROOT"; then
-    echo "Build failed." >&2
+if [[ "$EXE" != /* ]]; then EXE="$PWD/$EXE"; fi
+if [[ ! -f "$EXE" || ! -x "$EXE" ]]; then
+  if (( BUILD_DEFAULT )); then
+    make -C "$ROOT" || exit 2
+  else
+    echo "Compiler executable not found: $EXE" >&2
     exit 2
   fi
 fi
 
-if [[ ! -d "$TEST_DIR" ]]; then
-  echo "Test directory not found: $TEST_DIR" >&2
-  exit 2
+if [[ "$MODE" == test ]]; then
+  exec python3 "$ROOT/test/run_tests.py" --compiler "$EXE"
 fi
 
-# Find any number of supported files, including files in subdirectories.
-# No fixed test-count limit.
+case "$MODE" in
+  ir) STAGE=--ir; OUTPUT="$ROOT/ir"; SUFFIX=.ir ;;
+  ast) STAGE=--typed-ast; OUTPUT="$ROOT/typed_ast"; SUFFIX=.typed.ast ;;
+  mips) STAGE=--mips; OUTPUT="$ROOT/mips"; SUFFIX=.s ;;
+esac
+
 mapfile -d '' -t SOURCES < <(
-  find "$TEST_DIR" -type f \
-    ! -path "$TEST_DIR/negative/*" ! -path "$TEST_DIR/ir/*" \( \
-    -name '*.min' -o \
-    -name '*.c' -o \
-    -name '*.cpp' -o \
-    -name '*.cc' -o \
-    -name '*.cxx' -o \
-    -name '*.C' \
-  \) -print0 | sort -z
+  find "$ROOT/test" -type f ! -path "$ROOT/test/negative/*" ! -path "$ROOT/test/ir/*" \
+    \( -name '*.min' -o -name '*.c' -o -name '*.cpp' -o -name '*.cc' -o -name '*.cxx' -o -name '*.C' \) \
+    -print0 | sort -z
 )
-
-if [[ ${#SOURCES[@]} -eq 0 ]]; then
-  echo "No supported source files found under $TEST_DIR." >&2
-  echo "Supported extensions: .min, .c, .cpp, .cc, .cxx, .C" >&2
-  exit 2
-fi
-
-if [[ "$MODE" == "ir" ]]; then
-  mkdir -p "$IR_DIR"
-else
-  mkdir -p "$AST_DIR"
-fi
+(( ${#SOURCES[@]} )) || { echo "No source demos found under test/." >&2; exit 2; }
 
 pass=0
 fail=0
-
-for SRC in "${SOURCES[@]}"; do
-  REL="${SRC#"$TEST_DIR"/}"
-
-  # Preserve the original extension and subdirectory structure to prevent
-  # collisions between files such as example.min and example.cpp.
-  if [[ "$MODE" == "ir" ]]; then
-    OUT="$IR_DIR/$REL.ir"
+for source in "${SOURCES[@]}"; do
+  relative="${source#"$ROOT/test/"}"
+  output="$OUTPUT/$relative$SUFFIX"
+  mkdir -p "$(dirname "$output")"
+  rm -f "$output"
+  if "$EXE" "$STAGE" "$source" -o "$output"; then
+    echo "PASS $relative"
+    pass=$((pass + 1))
   else
-    OUT="$AST_DIR/$REL.typed.ast"
-  fi
-
-  mkdir -p "$(dirname "$OUT")"
-  rm -f "$OUT"
-
-  printf '\n== %s ==\n' "$REL"
-
-  if [[ "$MODE" == "ir" ]]; then
-    if "$EXE" "$SRC" -o "$OUT"; then
-      echo "IR generated: ${OUT#"$ROOT"/}"
-      pass=$((pass + 1))
-    else
-      echo "IR generation failed: $REL" >&2
-      rm -f "$OUT"
-      fail=$((fail + 1))
-    fi
-  else
-    if "$EXE" --dump-typed-ast "$SRC" > "$OUT"; then
-      echo "Typed AST generated: ${OUT#"$ROOT"/}"
-      pass=$((pass + 1))
-    else
-      echo "Typed AST generation failed: $REL" >&2
-      rm -f "$OUT"
-      fail=$((fail + 1))
-    fi
+    echo "FAIL $relative" >&2
+    rm -f "$output"
+    fail=$((fail + 1))
   fi
 done
-
-echo
-echo "Total: ${#SOURCES[@]}"
-echo "Passed: $pass"
-echo "Failed: $fail"
-
+printf 'Total: %d, passed: %d, failed: %d\n' "${#SOURCES[@]}" "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
