@@ -1,0 +1,2 @@
+class Box { public: int value; void set(int input) { value = input; } };
+int main() { Box box; const Box &view = box; view.set(2); return 0; }

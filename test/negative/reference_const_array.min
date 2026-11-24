@@ -1,0 +1,2 @@
+typedef int Array[2];
+int main() { Array values = {1, 2}; const Array &view = values; view[0] = 3; return 0; }

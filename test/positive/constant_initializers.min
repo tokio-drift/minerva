@@ -1,0 +1,13 @@
+enum Values { EIGHT = 1 << 3, MASK = ~0, NEWLINE = '\n' };
+int constants[3] = {EIGHT + sizeof(int), (int)3.75, MASK};
+unsigned wrapped = (unsigned)-1 + 1;
+char byte = (char)257;
+float converted = (int)3.5;
+int negative = -1.5;
+int main() {
+    static short small = (short)65535;
+    switch (constants[0]) {
+        case EIGHT + sizeof(int): { return constants[1] + constants[2] + byte + small + negative; }
+        default: { return 0; }
+    }
+}

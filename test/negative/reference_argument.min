@@ -1,0 +1,2 @@
+int use(int &value) { return value; }
+int main() { return use(3); }

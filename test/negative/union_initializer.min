@@ -1,0 +1,2 @@
+union Choice { int value; char byte; };
+int main() { union Choice choice = {1, 2}; return 0; }

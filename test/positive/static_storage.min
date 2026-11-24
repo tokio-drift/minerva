@@ -1,0 +1,19 @@
+enum Constants { START = 2, STEP = START + sizeof(int) };
+int global = START + sizeof(int*) * 2;
+float fraction = -1.25;
+char newline = '\n';
+unsigned large = 0xffffffff;
+int *nothing = nullptr;
+static int moduleCounter = 3;
+int tick() {
+    static int counter = START;
+    counter++;
+    { static int counter = STEP; counter++; }
+    return counter;
+}
+int other() { static int counter; counter += 2; return counter; }
+int main() {
+    int first = tick();
+    int second = tick();
+    return second - first + other() + global + moduleCounter;
+}

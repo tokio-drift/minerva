@@ -1,0 +1,3 @@
+int value() { return 4; }
+int counter = value();
+int main() { return counter; }
