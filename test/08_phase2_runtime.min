@@ -19,7 +19,7 @@ int main() {
     heap->value = box.value;
     int a = (int)3.5;
     int bytes = sizeof(int);
-    int values[3];
+    int values[3] = {7};
     int arrayBytes = sizeof(values);
     int *p = &values[0];
     int firstValue = first(values);

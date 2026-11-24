@@ -34,20 +34,19 @@ int main() {
   // computed indices and counting
   int data[10] = {1, 3, 2, 3, 4, 1, 1, 0, 4, 4};
   int counts[5] = {0};
-  for (int i = 0; i < 10; i++) 
+  for (int i = 0; i < 10; i++) counts[data[i]]++;
   for (int i = 0; i < 5; i++) printf("%d ", counts[i]);
   printf("\n");
 
-  // char arrays: initialised from a string, element access, modification
-  // char s[] = "hello";
-  // char t[10] = "ab";
-  // printf("%s %s %d %d\n", s, t, length(s), length(t));
-  // reverse(s);
-  // s[0] = 'O';
-  // printf("%s\n", s);
-  // char letters[4] = {'w', 'x', 'y', 'z'};
-  // for (int i = 0; i < 4; i++) printf("%c", letters[i]);
-  // printf("\n");
+  char s[] = "hello";
+  char t[10] = "ab";
+  printf("%s %s %d %d\n", s, t, length(s), length(t));
+  reverse(s);
+  s[0] = 'O';
+  printf("%s\n", s);
+  char letters[4] = {'w', 'x', 'y', 'z'};
+  for (int i = 0; i < 4; i++) printf("%c", letters[i]);
+  printf("\n");
 
   // build a string by hand
   char buf[8];
@@ -56,9 +55,5 @@ int main() {
   buf[5] = 0;
   printf("%s %d\n", buf, length(buf));
 
-  // double and unsigned char arrays
-  // double d[3] = {0.5, 1.5, 2.5};
-  // unsigned char bytes[3] = {10, 200, 255};
-  // printf("%f %d\n", d[0] + d[2], bytes[1] + bytes[2]);
   return 0;
 }
