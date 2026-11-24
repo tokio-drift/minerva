@@ -932,12 +932,7 @@ IROperand IRGenerator::lowerExpression(Node *node) {
             IROperand value = IROperand::function(name); value.type = makePointer(lowerReferenceType(signature)); return value;
         }
         if (u.kind == UnsupKind::New) {
-            if (!u.kids.empty()) { unsupported(node->loc, "constructors are not implemented; new supports default allocation only"); return IROperand(); }
-            TypeRef objectType = typeOfExpression(node)->sub;
-            long long bytes = analyzer_->sizeOfType(objectType);
-            if (bytes <= 0) { unsupported(node->loc, "cannot allocate an incomplete or zero-sized type '" + u.name + "'"); return IROperand(); }
-            IROperand size = emitConstant(makeType(TypeKind::Int), std::to_string(bytes));
-            return lowerRuntimeCall("malloc", makePointer(objectType), {size}, true);
+            return lowerNew(u);
         }
         if (u.kind == UnsupKind::Delete) {
             if (u.kids.empty() || !u.kids[0]) { irError(node->loc, "delete has no operand"); return IROperand(); }
@@ -1324,6 +1319,30 @@ IROperand IRGenerator::lowerAssign(const Assign &node) {
         store.args = {address, value}; function_->body.push_back(store);
     }
     return direct ? target : value;
+}
+
+IROperand IRGenerator::lowerNew(const Unsupported &node) {
+    TypeRef result = typeOfExpression(&node), object = result->sub;
+    TypeRef integer = makeType(TypeKind::Int);
+    IROperand count = node.arrayForm ? lowerExpression(node.kids[0].get()) : emitConstant(integer, "1");
+    if (failed_) return IROperand();
+    count = emitConvert(count, promote(count.type));
+    IROperand bytes = emitConstant(integer, std::to_string(analyzer_->sizeOfType(object)));
+    IROperand zero = emitConstant(integer, node.hasInitializer && !node.kids[1] ? "1" : "0");
+    IROperand pointer = lowerRuntimeCall("__minerva_allocate", result, {count, bytes, zero}, true);
+    if (node.kids[1]) {
+        std::string initialize = newLabel(), done = newLabel();
+        emitBranch(pointer, initialize, done);
+        emitLabel(initialize);
+        IROperand value = lowerExpression(node.kids[1].get());
+        if (failed_) return IROperand();
+        value = emitConvert(value, object);
+        IRInstruction store; store.op = IROp::Store; store.type = object; store.args = {pointer, value};
+        function_->body.push_back(store);
+        emitJump(done);
+        emitLabel(done);
+    }
+    return pointer;
 }
 
 IROperand IRGenerator::lowerRuntimeCall(const std::string &name, TypeRef result,

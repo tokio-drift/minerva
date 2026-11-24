@@ -32,6 +32,7 @@ private:
     void resetHistory();
     void finishHistory();
     IROperand lowerExpression(Node *node);
+    IROperand lowerNew(const Unsupported &node);
     IROperand lowerAddress(Node *node);
     IROperand lowerArrayDecay(Node *node);
     IROperand lowerIdentifier(const Ident &node);

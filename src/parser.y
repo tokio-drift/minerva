@@ -84,6 +84,15 @@ static TypeSpec *mergeType(TypeSpec *t, int quals, TypeSpec *chain) {
 }
 static string takeTypeStr(TypeSpec *t) { string s = t->str(); delete t; return s; }
 
+static Node *makeNew(SrcLoc loc, TypeSpec *type, Node *bound, bool initialized, Node *value) {
+    auto *node = static_cast<Unsupported *>(unsupN(loc, UnsupKind::New, "new", {bound, value}));
+    node->allocatedType = *type;
+    node->arrayForm = bound != nullptr;
+    node->hasInitializer = initialized;
+    delete type;
+    return node;
+}
+
 // Applies a type to every declarator and wraps them in a DeclStmt. Consumes t and decls.
 static Node *makeDeclStmt(SrcLoc l, TypeSpec *t, NodeList *decls) {
     auto *ds = new DeclStmt(l);
@@ -148,6 +157,8 @@ static Node *makeDeclStmt(SrcLoc l, TypeSpec *t, NodeList *decls) {
 %nonassoc ELSE
 %right '=' ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN AND_ASSIGN OR_ASSIGN XOR_ASSIGN SHL_ASSIGN SHR_ASSIGN
 %right '?' ':'
+%precedence NEW_TYPE_END EMPTY_CAPTURE
+%precedence ']'
 %left OR_OP
 %left AND_OP
 %left '|'
@@ -229,10 +240,10 @@ ptr_ref_chain
     ;
 
 full_type
-    : type_specifier { $$ = $1; }
-    | type_specifier ptr_ref_chain { $$ = mergeType($1, 0, $2); }
-    | type_qualifier_list type_specifier { $$ = mergeType($2, $1, nullptr); }
-    | type_qualifier_list type_specifier ptr_ref_chain { $$ = mergeType($2, $1, $3); }
+    : type_specifier %prec NEW_TYPE_END { $$ = $1; }
+    | type_specifier ptr_ref_chain %prec NEW_TYPE_END { $$ = mergeType($1, 0, $2); }
+    | type_qualifier_list type_specifier %prec NEW_TYPE_END { $$ = mergeType($2, $1, nullptr); }
+    | type_qualifier_list type_specifier ptr_ref_chain %prec NEW_TYPE_END { $$ = mergeType($2, $1, $3); }
     ;
 
 type_name
@@ -695,13 +706,15 @@ unary_expression
     | SIZEOF '(' type_name ')' {
           $$ = unsupN(L(@1), UnsupKind::Sizeof, "sizeof-type " + takeTypeStr($3), {}); }
     | SIZEOF '(' expression ')' { $$ = unsupN(L(@1), UnsupKind::Sizeof, "sizeof-expr", {$3}); }
-    | NEW IDENTIFIER '(' argument_list_opt ')' {
-          $$ = unsupL(L(@1), UnsupKind::New, "new " + S($2), $4);
-          setName($$, S($2)); }
-    | NEW IDENTIFIER {
-          $$ = unsupN(L(@1), UnsupKind::New, "new " + S($2), {});
-          setName($$, S($2)); }
+    | NEW full_type { $$ = makeNew(L(@1), $2, nullptr, false, nullptr); }
+    | NEW full_type '(' ')' { $$ = makeNew(L(@1), $2, nullptr, true, nullptr); }
+    | NEW full_type '(' assignment_expression ')' { $$ = makeNew(L(@1), $2, nullptr, true, $4); }
+    | NEW full_type '[' expression ']' { $$ = makeNew(L(@1), $2, $4, false, nullptr); }
+    | NEW full_type '[' expression ']' '(' ')' { $$ = makeNew(L(@1), $2, $4, true, nullptr); }
     | DELETE unary_expression { $$ = unsupN(L(@1), UnsupKind::Delete, "delete", {$2}); }
+    | DELETE '[' ']' unary_expression {
+          $$ = unsupN(L(@1), UnsupKind::Delete, "delete[]", {$4});
+          static_cast<Unsupported *>($$)->arrayForm = true; }
     ;
 
 postfix_expression
@@ -737,7 +750,7 @@ primary_expression
     ;
 
 lambda_capture
-    : /* empty */ { $$ = newList(); }
+    : /* empty */ %prec EMPTY_CAPTURE { $$ = newList(); }
     | '=' { $$ = newList(unsupN(L(@1), UnsupKind::Lambda, "capture-by-value-all", {})); }
     | '&' { $$ = newList(unsupN(L(@1), UnsupKind::Lambda, "capture-by-ref-all", {})); }
     | argument_list { $$ = $1; }

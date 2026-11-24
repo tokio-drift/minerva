@@ -143,7 +143,10 @@ class Emitter {
         } else if (operand.kind == IROperand::Kind::Function) {
             auto found = functions.find(operand.name);
             if (found == functions.end()) error("unknown function '" + operand.name + "'");
-            else line("la " + reg + ", " + found->second);
+            else {
+                if (found->second.compare(0, 8, "__mv_rt_") == 0) requireRuntime(found->second.substr(8));
+                line("la " + reg + ", " + found->second);
+            }
         } else {
             address(operand, "$t8");
             if (objectType(operand.type)) line("move " + reg + ", $t8");
@@ -596,9 +599,10 @@ public:
             functions[fn.name] = "__mv_f" + std::to_string(functions.size());
             if (fn.name == "main") entry = &fn;
         }
-        for (const auto &name : {"printf", "scanf", "malloc", "free"})
+        for (const auto &name : {"printf", "scanf", "malloc", "free", "file_open", "file_read", "file_write", "file_close"})
             functions[name] = "__mv_rt_" + std::string(name);
         functions["__minerva_snapshot"] = "__mv_rt_snapshot";
+        functions["__minerva_allocate"] = "__mv_rt_allocate";
         functions["__minerva_rewind"] = "__mv_rt_rewind";
         functions["__minerva_history_clear"] = "__mv_rt_history_clear";
         if (!entry || !validEntry(*entry)) {

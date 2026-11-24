@@ -71,6 +71,7 @@ TypeRef makePointer(TypeRef to);
 TypeRef makeReference(TypeRef to);
 TypeRef makeArray(TypeRef elem, std::vector<long long> dims);
 TypeRef makeFunction(TypeRef ret, std::vector<TypeRef> params);
+TypeRef fileFunctionType(const std::string &name);
 TypeRef makeAggregate(const std::string &name);
 
 // Value category of an expression, needed before IR generation.

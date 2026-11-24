@@ -285,3 +285,15 @@ TypeRef lowerReferenceType(TypeRef type) {
     }
     return type;
 }
+
+TypeRef fileFunctionType(const std::string &name) {
+    if (name != "file_open" && name != "file_read" && name != "file_write" && name != "file_close") return nullptr;
+    TypeRef integer = makeType(TypeKind::Int);
+    TypeRef character = makeType(TypeKind::Char);
+    auto readonly = std::make_shared<Type>(*character);
+    readonly->isConst = true;
+    if (name == "file_open") return makeFunction(integer, {makePointer(readonly), integer, integer});
+    if (name == "file_read") return makeFunction(integer, {integer, makePointer(character), integer});
+    if (name == "file_write") return makeFunction(integer, {integer, makePointer(readonly), integer});
+    return makeFunction(makeType(TypeKind::Void), {integer});
+}

@@ -190,6 +190,9 @@ struct Unsupported : Node {
     std::string name;                 // declared type name, member or captured name
     std::string declVar;              // variable or alias declared with the construct
     std::string baseName;             // base class of a class definition
+    TypeSpec allocatedType;
+    bool arrayForm = false;
+    bool hasInitializer = false;
     NodeList kids;                   // sub-nodes that were already built (entries may be null)
     Unsupported(SrcLoc l, UnsupKind k, std::string w, NodeList kids)
         : Node(NodeKind::Unsupported, l), what(std::move(w)), kind(k), kids(std::move(kids)) {}

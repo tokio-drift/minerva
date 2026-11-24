@@ -34,6 +34,8 @@ extern int g_commentStartLine;
 DIGIT [0-9]
 LETTER [a-zA-Z_]
 ID {LETTER}({LETTER}|{DIGIT})*
+EXPONENT [eE][+-]?{DIGIT}+
+FLOAT_NUMBER (({DIGIT}+"."{DIGIT}*|"."{DIGIT}+)({EXPONENT})?|{DIGIT}+{EXPONENT})[fF]?
 
 %%
 
@@ -66,8 +68,13 @@ ID {LETTER}({LETTER}|{DIGIT})*
 0[xX][0-9a-fA-F]+ RET_VAL("INT_LITERAL", INT_LITERAL)
 0[bB][01]+ RET_VAL("INT_LITERAL", INT_LITERAL)
 
-{DIGIT}+"."{DIGIT}+([eE][+-]?{DIGIT}+)? RET_VAL("FLOAT_LITERAL", FLOAT_LITERAL)
-{DIGIT}+[eE][+-]?{DIGIT}+ RET_VAL("FLOAT_LITERAL", FLOAT_LITERAL)
+{FLOAT_NUMBER} {
+    addTok("FLOAT_LITERAL");
+    string value(yytext);
+    if (value.back() == 'f' || value.back() == 'F') value.pop_back();
+    yylval.sval = internStr(value.c_str());
+    return FLOAT_LITERAL;
+}
 {DIGIT}+{LETTER}({LETTER}|{DIGIT})* {addErr("Invalid number/identifier (digit-led): "+string(yytext));}
 {DIGIT}+ RET_VAL("INT_LITERAL", INT_LITERAL)
 

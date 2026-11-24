@@ -67,6 +67,7 @@ private:
     void checkDeclaration(const VarDecl &decl);
     void checkStatement(Node *node);
     void checkUnsupported(const Unsupported &node);
+    TypeRef checkNew(const Unsupported &node);
     void checkIO(const Unsupported &node);
     void checkSwitchLabels(Node *node, TypeRef controller, std::vector<long long> &values, bool &hasDefault);
     void checkReturn(const Return &node);

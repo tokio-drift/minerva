@@ -364,6 +364,9 @@ const Analyzer::Symbol *Analyzer::lookup(const std::string &name) const {
 bool Analyzer::declareVariable(const std::string &name, TypeRef type, const SrcLoc &loc,
                                const Node *declaration, bool persistent) {
     auto &scope = scopes_.back();
+    if (fileFunctionType(name)) {
+        error(loc, "reserved-name", "'" + name + "' is a predefined file function"); return false;
+    }
     if (scope.count(name)) {
         error(loc, "redeclaration", "redeclaration of '" + name + "'");
         return false;
@@ -384,6 +387,9 @@ bool Analyzer::declareFunction(const std::string &name, TypeRef type, const SrcL
 
 bool Analyzer::declareTypeName(const std::string &name, TypeRef type, const SrcLoc &loc) {
     auto &scope = scopes_.back();
+    if (fileFunctionType(name)) {
+        error(loc, "reserved-name", "'" + name + "' is a predefined file function"); return false;
+    }
     if (scope.count(name)) {
         error(loc, "redefinition", "redefinition of type '" + name + "'");
         return false;
@@ -444,6 +450,8 @@ void Analyzer::analyze(const Program &program) {
     loopDepth_ = 0;
     switchDepth_ = 0;
 
+    for (const auto &name : {"file_open", "file_read", "file_write", "file_close"})
+        declareFunction(name, fileFunctionType(name), {});
     registerAggregates(program);
     registerFunctions(program);
 
@@ -1131,23 +1139,13 @@ void Analyzer::checkUnsupported(const Unsupported &u) {
         return;
     }
     case UnsupKind::New: {
-        if (!u.name.empty()) {
-            const Symbol *sym = lookup(u.name);
-            if (!sym || sym->kind != Symbol::Kind::TypeName)
-                error(u.loc, "unknown-type", "unknown type name '" + u.name + "'");
-            else if (sym->type->kind != TypeKind::Aggregate)
-                error(u.loc, "unsupported-construct", "new requires a named aggregate type");
-        }
-        if (!u.kids.empty()) error(u.loc, "unsupported-construct", "new supports allocation without constructor arguments");
-        for (const auto &kid : u.kids) {
-            if (kid) checkExpression(kid.get());
-        }
+        checkNew(u);
         return;
     }
     case UnsupKind::Delete: {
         if (!u.kids.empty() && u.kids[0]) {
             ExprInfo value = decay(checkExpression(u.kids[0].get()));
-            if (!value.type->isPointer())
+            if (!value.type->isPointer() || value.type->sub->isFunction())
                 error(u.loc, "invalid-operand",
                       "cannot delete a value of type '" + value.type->str() + "'");
         }
@@ -1212,6 +1210,25 @@ void Analyzer::checkUnsupported(const Unsupported &u) {
     default:
         return;
     }
+}
+
+TypeRef Analyzer::checkNew(const Unsupported &node) {
+    TypeRef object = resolveType(node.allocatedType, node.loc);
+    if (!unknownType(object) && (object->kind == TypeKind::Reference || sizeOfType(object) <= 0 || node.allocatedType.isStatic))
+        error(node.loc, "invalid-type", "new requires a complete object type");
+    if (node.arrayForm && node.kids[0]) {
+        ExprInfo bound = decay(checkExpression(node.kids[0].get()));
+        if (!unknownType(bound.type) && !bound.type->isInteger())
+            error(node.kids[0]->loc, "type-mismatch", "new array bound must be an integer");
+    }
+    if (node.kids[1]) {
+        ExprInfo value = decay(checkExpression(node.kids[1].get()));
+        if (!unknownType(object) && !object->isScalar())
+            error(node.loc, "unsupported-construct", "new initializer requires a scalar type; constructors are not supported");
+        else if (!assignable(object, value.type))
+            error(node.kids[1]->loc, "type-mismatch", "incompatible initializer for allocated type '" + object->str() + "'");
+    }
+    return object;
 }
 
 ExprInfo Analyzer::checkExpression(Node *node) {
@@ -1411,10 +1428,8 @@ ExprInfo Analyzer::computeExpression(Node *node) {
             return {makeUnknown(), ExprCategory::RValue};
         }
         if (u.kind == UnsupKind::New) {
-            checkUnsupported(u);
-            const Symbol *sym = lookup(u.name);
-            if (sym && sym->kind == Symbol::Kind::TypeName) return {makePointer(sym->type), ExprCategory::RValue};
-            return {makeUnknown(), ExprCategory::RValue};
+            TypeRef object = checkNew(u);
+            return {unknownType(object) ? makeUnknown() : makePointer(object), ExprCategory::RValue};
         }
         if (u.kind == UnsupKind::Delete) {
             checkUnsupported(u);
@@ -1734,8 +1749,22 @@ ExprInfo Analyzer::checkCall(const Call &c) {
     for (size_t i = 0; i < checked; i++) {
         ExprInfo argument = checkExpression(c.args[i].get());
         TypeRef expected = function->params[i];
+        TypeRef actual = decay(argument).type;
         bool valid = expected->kind == TypeKind::Reference
-            ? bindableReference(expected, argument) : assignable(expected, decay(argument).type);
+            ? bindableReference(expected, argument) : assignable(expected, actual);
+        if (expected->isPointer() && actual->isPointer() && actual->sub->isConst && !expected->sub->isConst)
+            valid = false;
+        if (c.callee->kind == NodeKind::Ident) {
+            const auto &name = static_cast<const Ident &>(*c.callee).name;
+            if (fileFunctionType(name) && expected->isPointer()) {
+                if (name == "file_read" && actual->isPointer() && actual->sub->kind == TypeKind::Char &&
+                    (actual->sub->isConst || c.args[i]->kind == NodeKind::StringLit)) {
+                    error(c.args[i]->loc, "file-buffer", "file_read requires a writable char buffer"); continue;
+                }
+                valid = actual->isPointer() && actual->sub->kind == TypeKind::Char &&
+                        (name != "file_read" || (!actual->sub->isConst && c.args[i]->kind != NodeKind::StringLit));
+            }
+        }
         if (!valid)
             error(c.args[i]->loc, expected->kind == TypeKind::Reference ? "reference-binding" : "type-mismatch",
                   "incompatible argument " + std::to_string(i + 1) + " ('" + expected->str() +

@@ -688,6 +688,8 @@ void restoreIRTypes(IRModule *module) {
         for (const auto &param : fn.params) params.push_back(param.type);
         functions[fn.name] = makePointer(makeFunction(fn.returnType, params));
     }
+    for (const auto &name : {"file_open", "file_read", "file_write", "file_close"})
+        functions[name] = makePointer(fileFunctionType(name));
     for (auto &fn : module->functions) {
         auto variables = globals;
         std::unordered_map<std::string, TypeRef> temps;
@@ -702,6 +704,11 @@ void restoreIRTypes(IRModule *module) {
                 if (arg.kind == IROperand::Kind::Literal) {
                     TypeRef context = (ins.op == IROp::ElementAddress || ins.op == IROp::ByteAddress) && i == 1
                         ? makeType(TypeKind::Int) : ins.type;
+                    if (ins.op == IROp::Call && i > 0 && !ins.args.empty()) {
+                        TypeRef signature = fileFunctionType(ins.args[0].name);
+                        if (signature && i <= signature->params.size()) context = signature->params[i - 1];
+                        if (ins.args[0].name == "__minerva_allocate") context = makeType(TypeKind::Int);
+                    }
                     arg.type = literalType(arg, context);
                 }
             }
@@ -994,11 +1001,13 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
     std::unordered_map<std::string, size_t> arities;
     for (const IRFunction &fn : module.functions) arities.emplace(fn.name, fn.params.size());
     const std::unordered_set<std::string> runtimeFunctions = {
-        "printf", "scanf", "malloc", "free", "__minerva_snapshot", "__minerva_rewind", "__minerva_history_clear"
+        "printf", "scanf", "malloc", "free", "__minerva_allocate", "__minerva_snapshot", "__minerva_rewind", "__minerva_history_clear",
+        "file_open", "file_read", "file_write", "file_close"
     };
 
     for (const IRFunction &fn : module.functions) {
         if (fn.name.empty()) fail("function without a name");
+        if (fileFunctionType(fn.name)) fail("function name '" + fn.name + "' is reserved for file I/O");
         if (!functionNames.insert(fn.name).second)
             fail("function '" + fn.name + "' is defined twice");
         if (!fn.returnType) fail("function '" + fn.name + "' has no return type");
@@ -1043,6 +1052,12 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
                 return;
             }
             if (o.kind == IROperand::Kind::Function) {
+                TypeRef signature = fileFunctionType(o.name);
+                if (signature) {
+                    defined = true;
+                    if (type) *type = makePointer(signature);
+                    return;
+                }
                 auto target = std::find_if(module.functions.begin(), module.functions.end(),
                     [&](const IRFunction &candidate) { return candidate.name == o.name; });
                 if (target != module.functions.end()) {
@@ -1287,6 +1302,28 @@ bool verifyIR(const IRModule &module, std::vector<std::string> *errors) {
                                 fail("runtime call to '__minerva_rewind' has the wrong number of arguments");
                             if ((callee == "printf" || callee == "scanf") && argc < 1)
                                 fail("runtime I/O call requires a format string");
+                            if (callee == "__minerva_allocate") {
+                                if (argc != 3) fail("runtime allocation requires three arguments");
+                                if (!ins.type || !ins.type->isPointer()) fail("runtime allocation requires a pointer result type");
+                                for (size_t i = 1; i < ins.args.size(); ++i) {
+                                    bool defined = false; TypeRef actual;
+                                    operandDefined(ins.args[i], defined, &actual);
+                                    if (!defined || !actual || !actual->isInteger()) fail("runtime allocation requires integer arguments");
+                                }
+                            }
+                            TypeRef signature = fileFunctionType(callee);
+                            if (signature) {
+                                if (argc != signature->params.size())
+                                    fail("runtime call to '" + callee + "' has the wrong number of arguments");
+                                if (!ins.type || !sameType(ins.type, signature->ret))
+                                    fail("runtime call to '" + callee + "' has an inconsistent result type");
+                                for (size_t i = 1; i < ins.args.size() && i <= signature->params.size(); ++i) {
+                                    bool defined = false; TypeRef actual;
+                                    operandDefined(ins.args[i], defined, &actual);
+                                    if (!defined || !sameType(actual, signature->params[i - 1]))
+                                        fail("runtime call to '" + callee + "' has an incompatible argument type");
+                                }
+                            }
                         }
                     } else if (arity->second != ins.args.size() - 1) {
                         fail("call in '" + fn.name + "' passes " + std::to_string(ins.args.size() - 1) +

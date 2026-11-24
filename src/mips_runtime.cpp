@@ -25,6 +25,7 @@ public:
         if (has("scanf"))
             for (const auto &helper : {"read_int", "read_float", "read_string", "getchar", "skip_space"}) require(helper);
         if (has("snapshot")) { require("malloc"); require("copy"); }
+        if (has("allocate")) require("malloc");
         if (has("rewind")) { require("free"); require("copy"); }
         if (has("history_clear")) require("free");
         out << ".data\n.align 2\n";
@@ -157,6 +158,44 @@ __mv_rt_printf_character:
     b __mv_rt_printf_loop
     nop
 __mv_rt_printf_done:
+    move $v0, $zero
+)"); r.end();
+}
+
+// Check the element count before multiplying, then optionally clear the payload.
+void emitAllocation(Runtime &r) {
+    r.begin("allocate"); r.arg("$s0", 0); r.arg("$s1", 1); r.arg("$s2", 2);
+    r.code(R"(    beq $s0, $zero, __mv_rt_allocate_null
+    nop
+    blez $s1, __mv_rt_allocate_null
+    nop
+    li $t0, 2147483624
+    divu $t0, $s1
+    mflo $t0
+    sltu $t1, $t0, $s0
+    bne $t1, $zero, __mv_rt_allocate_null
+    nop
+    multu $s0, $s1
+    mflo $s1
+    addiu $sp, $sp, -8
+    sw $s1, 0($sp)
+    jal __mv_rt_malloc
+    nop
+    addiu $sp, $sp, 8
+    beq $v0, $zero, __mv_rt_allocate_return
+    nop
+    beq $s2, $zero, __mv_rt_allocate_return
+    nop
+    move $t0, $v0
+__mv_rt_allocate_zero:
+    sb $zero, 0($t0)
+    addiu $t0, $t0, 1
+    addiu $s1, $s1, -1
+    bne $s1, $zero, __mv_rt_allocate_zero
+    nop
+    b __mv_rt_allocate_return
+    nop
+__mv_rt_allocate_null:
     move $v0, $zero
 )"); r.end();
 }
@@ -705,11 +744,27 @@ __mv_rt_scanf_done:
 
 }
 
+namespace {
+
+void emitFileIO(Runtime &r) {
+    const char *names[] = {"file_open", "file_read", "file_write", "file_close"};
+    for (int i = 0; i < 4; ++i) {
+        r.begin(names[i], true);
+        r.arg("$a0", 0);
+        if (i < 3) { r.arg("$a1", 1); r.arg("$a2", 2); }
+        r.code("    li $v0, " + std::to_string(13 + i) + "\n    syscall\n");
+        r.end();
+    }
+}
+
+}
+
 std::string emitMIPSRuntime(const std::vector<std::string> &helpers) {
     if (helpers.empty()) return "";
     Runtime runtime(helpers);
     emitPrinting(runtime);
     emitPrintf(runtime);
+    emitAllocation(runtime);
     emitAllocator(runtime);
     emitHistory(runtime);
     emitInput(runtime);
@@ -717,5 +772,6 @@ std::string emitMIPSRuntime(const std::vector<std::string> &helpers) {
     emitReadFloat(runtime);
     emitReadString(runtime);
     emitScanf(runtime);
+    emitFileIO(runtime);
     return runtime.str();
 }

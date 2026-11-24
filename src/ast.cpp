@@ -217,7 +217,13 @@ static void dumpNode(const Node *n, std::ostream &os, int d) {
         dumpList(static_cast<const InitList *>(n)->elems, os, d + 1); break;
     case NodeKind::Unsupported: {
         auto *x = static_cast<const Unsupported *>(n);
-        pad(os, d); os << "Unsupported " << x->what << '\n';
+        pad(os, d); os << "Unsupported " << x->what;
+        if (x->kind == UnsupKind::New) {
+            os << ' ' << x->allocatedType.str();
+            if (x->arrayForm) os << "[]";
+            if (x->hasInitializer) os << (x->kids[1] ? "(value)" : "()");
+        }
+        os << '\n';
         dumpList(x->kids, os, d + 1); break;
     }
     }
