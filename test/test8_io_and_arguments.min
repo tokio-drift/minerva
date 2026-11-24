@@ -1,3 +1,21 @@
+int fileDemo(char *path) {
+    char message[] = "Minerva file I/O works!\n";
+    char buffer[64];
+    printf("file: %s\n", path);
+    int fd = file_open(path, 577, 420);
+    if (fd < 0) { printf("file open for writing failed\n"); return 1; }
+    int written = file_write(fd, message, sizeof(message) - 1);
+    file_close(fd);
+    if (written != sizeof(message) - 1) { printf("file write failed\n"); return 1; }
+    fd = file_open(path, 0, 0);
+    if (fd < 0) { printf("file open for reading failed\n"); return 1; }
+    int count = file_read(fd, buffer, sizeof(buffer) - 1);
+    file_close(fd);
+    if (count < 0) { printf("file read failed\n"); return 1; }
+    buffer[count] = '\0';
+    printf("file bytes: wrote=%d read=%d\ncontents: %s", written, count, buffer);
+    return count == written ? 0 : 1;
+}
 int main(int argc, char **argv) {
     printf("=== Input, output and arguments ===\n");
     printf("extra arguments=%d\n", argc - 1);
@@ -11,5 +29,6 @@ int main(int argc, char **argv) {
     printf("\nread: %d %f %c %s\n", number, fraction, letter, word);
     char format[] = "dynamic format: %d %u %f %c %s %%\n";
     printf(format, number, (unsigned)number, fraction, letter, word);
+    if (argc > 3) return fileDemo(argv[3]);
     return 0;
 }

@@ -1,7 +1,45 @@
 struct Node { int value; struct Node *next; };
+
+void showScalars() {
+    int *integer = new int(5);
+    char *letter = new char('A');
+    short *small = new short(-1234);
+    unsigned *positive = new unsigned(42);
+    float *fraction = new float(2.5f);
+    int **pointer = new int*(integer);
+    int *zero = new int();
+    printf("heap scalars: int=%d char=%c short=%d unsigned=%u float=%f\n",
+           *integer, *letter, *small, *positive, *fraction);
+    printf("heap pointer points to=%d; value-initialized int=%d\n", **pointer, *zero);
+    delete pointer;
+    delete integer;
+    delete letter;
+    delete small;
+    delete positive;
+    delete fraction;
+    delete zero;
+}
+
+void showArrays(int n) {
+    float *array = new float[n];
+    for (int i = 0; i < n; i++) array[i] = (i + 1) * 1.25f;
+    printf("runtime float array (length=%d):", n);
+    for (int i = 0; i < n; i++) printf(" %f", array[i]);
+    printf("\n");
+    int *zeros = new int[n]();
+    printf("value-initialized integer array:");
+    for (int i = 0; i < n; i++) printf(" %d", zeros[i]);
+    char *word = new char[n + 1]();
+    word[0] = 'O';
+    word[1] = 'K';
+    printf("\nzero-terminated heap character array: %s\n", word);
+    delete[] array;
+    delete[] zeros;
+    delete[] word;
+}
+
 // Build and release a list, then show whole-block reuse.
-int main() {
-    printf("=== Dynamic memory ===\n");
+void showObjects() {
     struct Node *head = nullptr;
     for (int i = 3; i > 0; i--) {
         struct Node *node = new Node;
@@ -19,6 +57,7 @@ int main() {
         delete old;
     }
     struct Node *first = new Node();
+    printf("value-initialized node: value=%d next-is-null=%d\n", first->value, first->next == nullptr);
     first->value = 42;
     first->next = nullptr;
     void *address = (void*)first;
@@ -31,5 +70,12 @@ int main() {
     struct Node *nothing = nullptr;
     delete nothing;
     printf("list deleted; deleting nullptr is safe\n");
+}
+
+int main() {
+    printf("=== Dynamic memory ===\n");
+    showScalars();
+    showArrays(4);
+    showObjects();
     return 0;
 }

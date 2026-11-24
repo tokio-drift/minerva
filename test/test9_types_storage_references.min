@@ -1,6 +1,7 @@
 int globalValues[3] = {4, 5};
 char globalMessage[] = "global";
 static int moduleValue = sizeof(int) * 2;
+float suffixedGlobal = 13.21f;
 int tick() { static int count; count++; return count; }
 typedef int Row[3];
 Row &select(Row &values) { return values; }
@@ -9,8 +10,11 @@ int main() {
     char small = (char)255;
     short medium = (short)65534;
     unsigned large = (unsigned)-1;
-    float mixed = 1.5 + 2;
+    float mixed = 1.5f + 2;
+    static float half = .5F;
+    float spellings = 1.f + 1e1F;
     printf("signed char=%d short=%d unsigned=%u float=%f int cast=%d\n", small, medium, large, mixed, (int)mixed);
+    printf("suffixed floats: global=%f static=%f expression=%f\n", suffixedGlobal, half, spellings);
     printf("sizes: char=%d short=%d int=%d float=%d pointer=%d\n", sizeof(char), sizeof(short), sizeof(int), sizeof(float), sizeof(int*));
     printf("global data: %s %d %d %d; static initializer=%d\n", globalMessage, globalValues[0], globalValues[1], globalValues[2], moduleValue);
     printf("static local across calls: %d %d %d\n", tick(), tick(), tick());
