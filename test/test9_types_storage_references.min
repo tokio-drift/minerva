@@ -1,0 +1,30 @@
+int globalValues[3] = {4, 5};
+char globalMessage[] = "global";
+static int moduleValue = sizeof(int) * 2;
+int tick() { static int count; count++; return count; }
+typedef int Row[3];
+Row &select(Row &values) { return values; }
+int main() {
+    printf("=== Types, storage and references ===\n");
+    char small = (char)255;
+    short medium = (short)65534;
+    unsigned large = (unsigned)-1;
+    float mixed = 1.5 + 2;
+    printf("signed char=%d short=%d unsigned=%u float=%f int cast=%d\n", small, medium, large, mixed, (int)mixed);
+    printf("sizes: char=%d short=%d int=%d float=%d pointer=%d\n", sizeof(char), sizeof(short), sizeof(int), sizeof(float), sizeof(int*));
+    printf("global data: %s %d %d %d; static initializer=%d\n", globalMessage, globalValues[0], globalValues[1], globalValues[2], moduleValue);
+    printf("static local across calls: %d %d %d\n", tick(), tick(), tick());
+    const int limit = 10;
+    int value = 4;
+    int &alias = value;
+    const int &view = value;
+    alias += 5;
+    printf("alias=%d original=%d const view=%d const value=%d\n", alias, value, view, limit);
+    Row values = {1, 2, 3};
+    Row &row = select(values);
+    row[1] = 8;
+    printf("array reference: %d %d %d; referent bytes=%d\n", values[0], values[1], values[2], sizeof(row));
+    { int moduleValue = 99; printf("shadowed local=%d\n", moduleValue); }
+    printf("module value after shadow scope=%d\n", moduleValue);
+    return 0;
+}

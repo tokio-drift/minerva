@@ -1,0 +1,35 @@
+struct Node { int value; struct Node *next; };
+// Build and release a list, then show whole-block reuse.
+int main() {
+    printf("=== Dynamic memory ===\n");
+    struct Node *head = nullptr;
+    for (int i = 3; i > 0; i--) {
+        struct Node *node = new Node;
+        node->value = i;
+        node->next = head;
+        head = node;
+    }
+    printf("heap linked list:");
+    struct Node *cursor = head;
+    while (cursor != nullptr) { printf(" %d", cursor->value); cursor = cursor->next; }
+    printf("\n");
+    while (head != nullptr) {
+        struct Node *old = head;
+        head = head->next;
+        delete old;
+    }
+    struct Node *first = new Node();
+    first->value = 42;
+    first->next = nullptr;
+    void *address = (void*)first;
+    delete first;
+    struct Node *reused = new Node;
+    reused->value = 99;
+    reused->next = nullptr;
+    printf("freed block reused=%d; stored value=%d\n", (void*)reused == address, reused->value);
+    delete reused;
+    struct Node *nothing = nullptr;
+    delete nothing;
+    printf("list deleted; deleting nullptr is safe\n");
+    return 0;
+}

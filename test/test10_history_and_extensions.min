@@ -1,0 +1,51 @@
+struct SearchState { int sum; int count; int choices[3]; };
+struct SearchState state = {0, 0, {0}};
+int items[3] = {2, 4, 5};
+int increment(int value) { return value + 1; }
+int search(int index, int target) {
+    if (state.sum == target) {
+        printf("solution:");
+        for (int i = 0; i < state.count; i++) printf(" %d", state.choices[i]);
+        printf("\n");
+        return 1;
+    }
+    if (index == 3 || state.sum > target) return 0;
+    snapshot state;
+    state.choices[state.count] = items[index];
+    state.count++;
+    state.sum += items[index];
+    printf("try %d -> sum=%d\n", items[index], state.sum);
+    int found = search(index + 1, target);
+    rewind state;
+    printf("rewind -> sum=%d choices=%d\n", state.sum, state.count);
+    if (found) return 1;
+    return search(index + 1, target);
+}
+// Show the extensions and roll back a recursive search state.
+int main() {
+    printf("=== Pipe, swap, snapshot and rewind ===\n");
+    int piped = 7 |> increment;
+    printf("7 piped into increment gives %d\n", piped);
+    int left = 3, right = 8;
+    left <-> right;
+    printf("swap gives left=%d right=%d\n", left, right);
+    int score = 10;
+    snapshot score;
+    score = 20;
+    snapshot score;
+    score = 30;
+    rewind score;
+    printf("first rewind restores %d\n", score);
+    rewind score;
+    printf("second rewind restores %d\n", score);
+    snapshot score;
+    score = 15;
+    snapshot score;
+    score = 25;
+    rewind score, 2;
+    printf("two-step rewind restores %d\n", score);
+    printf("Subset-sum backtracking, target 7:\n");
+    int found = search(0, 7);
+    printf("found=%d; state restored to sum=%d choices=%d\n", found, state.sum, state.count);
+    return found ? 0 : 1;
+}

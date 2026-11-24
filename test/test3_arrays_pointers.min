@@ -1,0 +1,31 @@
+int sum(int values[], int count) {
+    int result = 0;
+    for (int i = 0; i < count; i++) result += values[i];
+    return result;
+}
+int main() {
+    printf("=== Arrays and pointers ===\n");
+    int numbers[5] = {1, 2, 3};
+    int inferred[] = {4, 5, 6};
+    int matrix[2][3] = {{1, 2, 3}, {4, 5, 6}};
+    numbers[1] = 8;
+    printf("array: %d %d %d %d %d; sum=%d\n", numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], sum(numbers, 5));
+    printf("inferred length=%d; matrix[1][2]=%d; matrix bytes=%d\n", sizeof(inferred) / sizeof(int), matrix[1][2], sizeof(matrix));
+    char word[] = "minerva";
+    char letters[4] = {'a', 'b', 'c', '\0'};
+    word[0] = 'M';
+    printf("strings: %s %s; indexed character=%c\n", word, letters, word[2]);
+    int value = 7;
+    int *pointer = &value;
+    int **doublePointer = &pointer;
+    int ***triplePointer = &doublePointer;
+    ***triplePointer = 21;
+    printf("three pointer levels changed value to %d\n", value);
+    pointer = &numbers[0];
+    pointer++;
+    printf("pointer increment: element=%d distance=%d\n", *pointer, pointer - &numbers[0]);
+    pointer += 2;
+    pointer--;
+    printf("pointer arithmetic: element=%d distance=%d\n", *pointer, pointer - &numbers[0]);
+    return 0;
+}

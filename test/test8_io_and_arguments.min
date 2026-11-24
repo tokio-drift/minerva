@@ -1,0 +1,15 @@
+int main(int argc, char **argv) {
+    printf("=== Input, output and arguments ===\n");
+    printf("extra arguments=%d\n", argc - 1);
+    for (int i = 1; i < argc; i++) printf("argument %d: %s\n", i, argv[i]);
+    int number = 0;
+    float fraction = 0.0;
+    char letter = '?';
+    char word[8] = "";
+    printf("Enter an integer, float, character and word: ");
+    scanf("%d %f %c %7s", &number, &fraction, &letter, word);
+    printf("\nread: %d %f %c %s\n", number, fraction, letter, word);
+    char format[] = "dynamic format: %d %u %f %c %s %%\n";
+    printf(format, number, (unsigned)number, fraction, letter, word);
+    return 0;
+}

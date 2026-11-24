@@ -1,0 +1,27 @@
+int factorial(int value) {
+    if (value <= 1) return 1;
+    return value * factorial(value - 1);
+}
+int square(int value) { return value * value; }
+int apply(int (*function)(int), int value) { return function(value); }
+void increment(int &value) { value++; }
+int &identity(int &value) { return value; }
+float combine(int a, char b, short c, unsigned d, float e, int *last) {
+    return a + b + c + d + e + *last;
+}
+int main() {
+    printf("=== Functions and recursion ===\n");
+    printf("factorial(5)=%d; nested square=%d\n", factorial(5), square(square(2)));
+    int (*function)(int) = square;
+    printf("function pointer=%d; callback=%d\n", function(3), apply(function, 4));
+    int (*lambda)(int);
+    lambda = [](int value) { return value + 3; };
+    printf("captureless lambda=%d\n", lambda(4));
+    int value = 6;
+    printf("six mixed arguments and a float return=%f\n", combine(1, 'A', 3, 4, 5.5, &value));
+    increment(value);
+    printf("reference parameter changed value to %d\n", value);
+    identity(value) = 12;
+    printf("reference return changed value to %d\n", value);
+    return 0;
+}

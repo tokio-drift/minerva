@@ -1,0 +1,32 @@
+// Print the arithmetic, logical, bitwise and assignment operators.
+int main() {
+    int a = 12, b = 5;
+    printf("=== Operators ===\n");
+    printf("a=%d b=%d\n", a, b);
+    printf("+ %d, - %d, * %d, / %d, remainder %d\n", a + b, a - b, a * b, a / b, a % b);
+    printf("unary + %d, unary - %d, not %d, complement %d\n", +a, -a, !0, ~a);
+    printf("and %d, or %d, xor %d, left shift %d, right shift %d\n", a & b, a | b, a ^ b, a << 2, a >> 1);
+    printf("== %d, != %d, < %d, <= %d, > %d, >= %d\n", a == b, a != b, a < b, a <= b, a > b, a >= b);
+    printf("logical and %d, logical or %d, ternary maximum %d\n", a && b, a || 0, a > b ? a : b);
+    int value = 10;
+    value += 5; printf("+= gives %d\n", value);
+    value -= 3; printf("-= gives %d\n", value);
+    value *= 2; printf("*= gives %d\n", value);
+    value /= 3; printf("/= gives %d\n", value);
+    value %= 5; printf("remainder assignment gives %d\n", value);
+    value <<= 2; value >>= 1; value &= 7; value |= 8; value ^= 3;
+    printf("shift and bitwise assignments give %d\n", value);
+    int count = 2;
+    int old = count++;
+    printf("post-increment: old=%d current=%d\n", old, count);
+    ++count; old = count--; --count;
+    printf("prefix increment and both decrements: old=%d current=%d\n", old, count);
+    int seen = 0;
+    int skipped = 0 && (seen = 99);
+    int taken = 1 || (seen = 99);
+    printf("short circuit: skipped=%d taken=%d side effects=%d\n", skipped, taken, seen);
+    int *pointer = &value;
+    *pointer = 42;
+    printf("address and dereference give %d; sizeof(int)=%d\n", value, sizeof(int));
+    return 0;
+}

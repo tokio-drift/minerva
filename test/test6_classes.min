@@ -1,0 +1,30 @@
+class Counter {
+private:
+    int step;
+protected:
+    int value;
+public:
+    void init(int start, int amount) { value = start; step = amount; }
+    int add() { value += step; return value; }
+    int read() { return value; }
+};
+class FancyCounter : public Counter {
+public:
+    int twice() { value *= 2; return value; }
+};
+int main() {
+    printf("=== Classes and inheritance ===\n");
+    FancyCounter first;
+    FancyCounter second;
+    first.init(5, 2);
+    second.init(10, 1);
+    printf("independent objects: first=%d second=%d\n", first.add(), second.add());
+    printf("derived method uses protected field: %d\n", first.twice());
+    FancyCounter *pointer = &first;
+    printf("method through pointer: %d\n", pointer->add());
+    FancyCounter copy = first;
+    copy.add();
+    printf("object copy: original=%d copy=%d\n", first.read(), copy.read());
+    printf("second object is still %d\n", second.read());
+    return 0;
+}

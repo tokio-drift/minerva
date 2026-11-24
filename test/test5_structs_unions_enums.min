@@ -1,0 +1,31 @@
+typedef int Count;
+enum Color { RED, GREEN = 5, BLUE };
+struct Point { int x; int y; };
+struct Tagged { char tag; struct Point point; short code; };
+union Number { int whole; float fraction; };
+struct Point translated(struct Point point, int amount) {
+    point.x += amount;
+    point.y += amount;
+    return point;
+}
+int main() {
+    printf("=== Structs, unions, enums and typedefs ===\n");
+    struct Point original = {2, 3};
+    struct Point moved = translated(original, 5);
+    printf("by-value argument: original=(%d,%d) returned=(%d,%d)\n", original.x, original.y, moved.x, moved.y);
+    struct Point *pointer = &original;
+    pointer->x = 9;
+    printf("arrow member access: x=%d\n", original.x);
+    *pointer = moved;
+    printf("whole-object assignment: (%d,%d)\n", original.x, original.y);
+    struct Tagged record = {'A', {4, 6}, 7};
+    printf("nested record: %c (%d,%d) code=%d bytes=%d\n", record.tag, record.point.x, record.point.y, record.code, sizeof(record));
+    union Number number = {42};
+    printf("union integer=%d; union bytes=%d\n", number.whole, sizeof(number));
+    number.fraction = 1.5;
+    printf("same union storage as float=%f\n", number.fraction);
+    Count count = 3;
+    enum Color color = GREEN;
+    printf("typedef count=%d; enum values=%d %d %d; selected=%d\n", count, RED, GREEN, BLUE, color);
+    return 0;
+}
