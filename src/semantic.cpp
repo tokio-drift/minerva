@@ -1300,6 +1300,7 @@ ExprInfo Analyzer::computeExpression(Node *node) {
                 error(u.loc, "unsupported-construct", "only captureless lambdas are supported by the current IR subset");
                 return {makeUnknown(), ExprCategory::RValue};
             }
+            TypeRef declaredReturn = u.hasReturnType ? resolveType(u.returnType, u.loc) : nullptr;
             std::vector<TypeRef> paramTypes;
             std::unordered_set<std::string> paramNames;
             for (const VarDecl *param : params) {
@@ -1328,6 +1329,8 @@ ExprInfo Analyzer::computeExpression(Node *node) {
             bool hasBareReturn = false;
             std::function<void(const Node *)> gatherReturns = [&](const Node *part) {
                 if (!part) return;
+                if (part->kind == NodeKind::Unsupported &&
+                    static_cast<const Unsupported *>(part)->kind == UnsupKind::Lambda) return;
                 if (part->kind == NodeKind::Return) {
                     const Return &ret = *static_cast<const Return *>(part);
                     if (!ret.value) hasBareReturn = true;
@@ -1336,8 +1339,8 @@ ExprInfo Analyzer::computeExpression(Node *node) {
                 }
                 forEachChild(*part, [&](const Node *child) { gatherReturns(child); });
             };
-            if (body) gatherReturns(body);
-            TypeRef returnType = makeType(TypeKind::Void);
+            if (body && !declaredReturn) gatherReturns(body);
+            TypeRef returnType = declaredReturn ? declaredReturn : makeType(TypeKind::Void);
             if (!returnTypes.empty()) {
                 returnType = returnTypes.front();
                 for (size_t i = 1; i < returnTypes.size(); ++i) {

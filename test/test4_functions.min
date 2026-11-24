@@ -17,6 +17,11 @@ int main() {
     int (*lambda)(int);
     lambda = [](int value) { return value + 3; };
     printf("captureless lambda=%d\n", lambda(4));
+    float (*half)(int) = [](int input) -> float {
+        int doubled = input * 2;
+        return doubled / 4.0f;
+    };
+    printf("lambda with explicit float return and a local variable=%f\n", half(5));
     int value = 6;
     printf("six mixed arguments and a float return=%f\n", combine(1, 'A', 3, 4, 5.5, &value));
     increment(value);

@@ -223,6 +223,7 @@ static void dumpNode(const Node *n, std::ostream &os, int d) {
             if (x->arrayForm) os << "[]";
             if (x->hasInitializer) os << (x->kids[1] ? "(value)" : "()");
         }
+        if (x->kind == UnsupKind::Lambda && x->hasReturnType) os << " -> " << x->returnType.str();
         os << '\n';
         dumpList(x->kids, os, d + 1); break;
     }

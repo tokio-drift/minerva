@@ -144,7 +144,7 @@ static Node *makeDeclStmt(SrcLoc l, TypeSpec *t, NodeList *decls) {
 %type <list> parameter_list_opt parameter_list statement_list_opt statement_list name_init_declarator_list
 %type <list> init_declarator_list array_suffix_list initializer_list_opt initializer_list argument_list_opt
 %type <list> argument_list lambda_capture
-%type <type> builtin_type_specifier type_specifier ptr_ref_chain full_type type_name local_type
+%type <type> builtin_type_specifier type_specifier ptr_ref_chain full_type type_name local_type lambda_return_type
 %type <ival> ptr_ref type_qualifier type_qualifier_list
 %type <sval> access_specifier
 
@@ -756,9 +756,20 @@ lambda_capture
     | argument_list { $$ = $1; }
     ;
 
+lambda_return_type
+    : /* empty */ { $$ = nullptr; }
+    | ARROW_OP full_type { $$ = $2; }
+    ;
+
 lambda_expression
-    : '[' lambda_capture ']' '(' parameter_list_opt ')' compound_statement {
-          $$ = unsupL(L(@1), UnsupKind::Lambda, "lambda", append(appendAll($2, $5), $7)); }
+    : '[' lambda_capture ']' '(' parameter_list_opt ')' lambda_return_type compound_statement {
+          $$ = unsupL(L(@1), UnsupKind::Lambda, "lambda", append(appendAll($2, $5), $8));
+          if ($7) {
+              auto *lambda = static_cast<Unsupported *>($$);
+              lambda->returnType = *$7;
+              lambda->hasReturnType = true;
+              delete $7;
+          } }
     | '[' lambda_capture ']' compound_statement {
           $$ = unsupL(L(@1), UnsupKind::Lambda, "lambda", append($2, $4)); }
     ;
